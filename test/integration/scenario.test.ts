@@ -29,9 +29,12 @@
 // 8  e6  2026-07-15  percent, JORDAN pays 4979, other 1245   -1245     -1103   (142-1245)
 // 9  s2  2026-07-20  settle,  ALEX -> JORDAN 1103            +1103         0   (-1103+1103) square mid-history
 // 10 e7  2026-07-22  manual,  ALEX pays 777, other 389        +389       389   (0+389)
+// 11 e8  2026-07-06  manual,  ALEX pays 500, other 250 — POSTED LAST but
+//                    BACKDATED between e3 and s1, so occurred_on must
+//                    outrank created_at and re-rank every later running.
 //
-// Final canonical balance: +389 (JORDAN owes ALEX 389 cents).
-// person_a (ALEX) sees +389; person_b (JORDAN) sees -389 — every delta and
+// Final canonical balance: +639 (JORDAN owes ALEX 639 cents).
+// person_a (ALEX) sees +639; person_b (JORDAN) sees -639 — every delta and
 // running value negates through viewerDelta.
 
 import { describe, it, expect } from "vitest";
@@ -236,27 +239,51 @@ describe("M1 gate — hand-computed 10-entry scenario with a same-day tie and a 
     });
     expect(entry.delta_cents).toBe(389);
     expect(entry.running_cents).toBe(389);
+    await tick();
+
+    // 11. e8: BACKDATED entry, posted LAST but occurred_on 2026-07-06
+    //     (between e3 on 07-05 and s1 on 07-08). This is the case that
+    //     forces occurred_on to outrank created_at: an ORDER BY created_at
+    //     (or rowid) view would append it at the end; the contract's order
+    //     slots it fourth and re-ranks every later running balance.
+    //     manual, ALEX pays 500, JORDAN's share 250 -> delta +250.
+    //     Its running at its slot: 1991 + 250 = 2241.
+    const e8 = crypto.randomUUID();
+    entry = await post(expensesPath, ALEX, {
+      id: e8,
+      occurred_on: "2026-07-06",
+      merchant: "Backdated Bakery",
+      total_cents: 500,
+      payer: ALEX,
+      method: "manual",
+      other_share_cents: 250,
+    });
+    expect(entry.delta_cents).toBe(250);
+    expect(entry.running_cents).toBe(2241);
 
     // ---- The whole hand-computed history, in the view's order ----
+    // e8 sits fourth despite being created last; every running value after
+    // it shifts by +250.
     const expectedIds = [
-      ids.e1, ids.e2, ids.e3, ids.s1, ids.e4,
+      ids.e1, ids.e2, ids.e3, e8, ids.s1, ids.e4,
       ids.e5, ids.v1, ids.e6, ids.s2, ids.e7,
     ];
     const expectedDeltas = [
-      2490, -1100, 601, -1500, 1251,
+      2490, -1100, 601, 250, -1500, 1251,
       -999, -601, -1245, 1103, 389,
     ];
-    // Running: 2490, 2490-1100=1390, +601=1991, -1500=491, +1251=1742,
-    //          -999=743, -601=142, -1245=-1103, +1103=0, +389=389.
+    // Running: 2490, 2490-1100=1390, +601=1991, +250=2241, -1500=741,
+    //          +1251=1992, -999=993, -601=392, -1245=-853, +1103=250,
+    //          +389=639.
     const expectedRunning = [
-      2490, 1390, 1991, 491, 1742,
-      743, 142, -1103, 0, 389,
+      2490, 1390, 1991, 2241, 741, 1992,
+      993, 392, -853, 250, 639,
     ];
 
     // ---- person_a's GET: canonical numbers, canonical order ----
     const asAlex = await getDetail(ledgerId, ALEX);
     expect(asAlex.viewer).toBe(ALEX);
-    expect(asAlex.entries).toHaveLength(10);
+    expect(asAlex.entries).toHaveLength(11);
     expect(asAlex.entries.map((e) => e.id)).toEqual(expectedIds);
     expect(asAlex.entries.map((e) => e.delta_cents)).toEqual(expectedDeltas);
     expect(asAlex.entries.map((e) => e.running_cents)).toEqual(expectedRunning);
@@ -267,9 +294,10 @@ describe("M1 gate — hand-computed 10-entry scenario with a same-day tie and a 
     expect(asAlex.entries[i4]!.occurred_on).toBe("2026-07-10");
     expect(asAlex.entries[i5]!.occurred_on).toBe("2026-07-10");
     expect(i4).toBeLessThan(i5);
-    expect(asAlex.entries[i4]!.created_at).toBeLessThanOrEqual(
-      asAlex.entries[i5]!.created_at,
-    );
+    // Strictly less: if the two created_at values ever tied, ordering would
+    // fall to random UUID comparison and the id-sequence assertion above
+    // would flake — surface that here instead.
+    expect(asAlex.entries[i4]!.created_at).toBeLessThan(asAlex.entries[i5]!.created_at);
 
     // The reversal is wired both ways in the detail payload.
     const e3Entry = asAlex.entries.find((e) => e.id === ids.e3);
@@ -287,7 +315,7 @@ describe("M1 gate — hand-computed 10-entry scenario with a same-day tie and a 
 
     // ...and through the contract's viewer translation, person_b sees every
     // delta and running value EXACTLY negated, person_a sees them unchanged.
-    for (let i = 0; i < 10; i += 1) {
+    for (let i = 0; i < 11; i += 1) {
       const jordanEntry = asJordan.entries[i]!;
       expect(viewerDelta(jordanEntry.delta_cents, JORDAN, L)).toBe(-expectedDeltas[i]!);
       expect(viewerDelta(jordanEntry.running_cents, JORDAN, L)).toBe(
@@ -298,10 +326,10 @@ describe("M1 gate — hand-computed 10-entry scenario with a same-day tie and a 
       expect(viewerDelta(alexEntry.running_cents, ALEX, L)).toBe(expectedRunning[i]!);
     }
 
-    // Final balance: ALEX is owed 389; JORDAN owes 389.
-    const finalCanonical = asAlex.entries[9]!.running_cents;
-    expect(finalCanonical).toBe(389);
-    expect(viewerDelta(finalCanonical, ALEX, L)).toBe(389);
-    expect(viewerDelta(finalCanonical, JORDAN, L)).toBe(-389);
+    // Final balance: ALEX is owed 639; JORDAN owes 639.
+    const finalCanonical = asAlex.entries[10]!.running_cents;
+    expect(finalCanonical).toBe(639);
+    expect(viewerDelta(finalCanonical, ALEX, L)).toBe(639);
+    expect(viewerDelta(finalCanonical, JORDAN, L)).toBe(-639);
   });
 });

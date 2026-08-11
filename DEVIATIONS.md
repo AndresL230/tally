@@ -47,3 +47,13 @@ on ledgers (enforces the canonical ordering the spec states in prose),
 `expenses.reverses_id` (an entry can be voided exactly once), NOT NULLs on
 required columns, and foreign keys (including `expenses.receipt_id ->
 receipts(id)`). Same data model, fewer representable corruptions.
+
+## D7. Cross-ledger idempotency-id collision is a 409, not a no-op
+
+Rule 4 says a repeat POST with the same client id is a no-op. Repeating the
+same request is: the server returns the existing entry with a 200. But the
+same id arriving at a DIFFERENT ledger is a collision, not a repeat —
+echoing the original row from another ledger's endpoint would leak data to
+a caller who may not be a member there. All three mutation routes answer
+409 { error } with nothing written and nothing echoed. (Found at first
+contact between the contract-written tests and the implementation.)

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ApiEntry, LedgerDetail, LedgerSummary, UserPrefs } from "../shared/types";
 import { otherMember, viewerDelta } from "../shared/ledger";
-import { api } from "./api";
+import { ApiError, api } from "./api";
 import { ARCHIVO, MONO, SERIF, colorsFor } from "./theme";
 import { LedgerScreen } from "./screens/LedgerScreen";
 import { ManualScreen, type ManualCommit } from "./screens/ManualScreen";
@@ -31,10 +31,16 @@ type Screen =
   | { name: "settle" }
   | { name: "detail"; entryId: string };
 
+function describeError(err: unknown): string {
+  if (err instanceof ApiError) return `That didn't save (${err.message}). Try again.`;
+  return "That didn't save — check the connection and try again.";
+}
+
 export default function App() {
   const [boot, setBoot] = useState<Boot>({ phase: "loading" });
   const [screen, setScreen] = useState<Screen>({ name: "ledger" });
   const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState<string | null>(null);
   // One idempotency id per user commit intent (contract rule 4). It is
   // minted on the first attempt and reused verbatim if that attempt fails
   // and the user retries; it clears on success or navigation.
@@ -59,6 +65,7 @@ export default function App() {
 
   const nav = (next: Screen) => {
     clearIntent();
+    setFlash(null);
     setScreen(next);
   };
 
@@ -98,10 +105,12 @@ export default function App() {
     setBoot({ ...boot, detail: next });
   };
 
-  // After every successful mutation: refetch the ledger detail, return to
-  // the ledger screen, and release the intent id.
+  // The intent id is released the moment the POST succeeds (so a later
+  // refresh failure can't cause a stale-id no-op that eats fresh edits);
+  // then refetch and return to the ledger.
   const afterMutation = async () => {
     clearIntent();
+    setFlash(null);
     await refresh();
     setScreen({ name: "ledger" });
   };
@@ -120,11 +129,12 @@ export default function App() {
         other_share_cents: payload.other_share_cents,
         note: "Entered by hand.",
       });
+      clearIntent();
       await afterMutation();
     } catch (err) {
-      // Stay on the screen; the intent id is kept so a retry is a no-op
-      // server-side if the first POST actually landed.
-      console.error(err);
+      // Stay on the screen; the intent id survives only if the POST itself
+      // failed, so a retry is a no-op server-side if it actually landed.
+      setFlash(describeError(err));
     } finally {
       setBusy(false);
     }
@@ -144,9 +154,10 @@ export default function App() {
         to_email: to,
         amount_cents,
       });
+      clearIntent();
       await afterMutation();
     } catch (err) {
-      console.error(err);
+      setFlash(describeError(err));
     } finally {
       setBusy(false);
     }
@@ -160,9 +171,10 @@ export default function App() {
         id: takeIntentId(),
         occurred_on: todayISO(),
       });
+      clearIntent();
       await afterMutation();
     } catch (err) {
-      console.error(err);
+      setFlash(describeError(err));
     } finally {
       setBusy(false);
     }
@@ -236,7 +248,25 @@ export default function App() {
       );
   }
 
-  return <Shell accent={colors.me}>{body}</Shell>;
+  return (
+    <Shell accent={colors.me}>
+      {flash && (
+        <div
+          style={{
+            margin: "0 22px 8px",
+            borderLeft: `3px solid ${colors.me}`,
+            paddingLeft: 14,
+            font: `400 14px ${ARCHIVO}`,
+            lineHeight: 1.5,
+            color: "#4a453d",
+          }}
+        >
+          {flash}
+        </div>
+      )}
+      {body}
+    </Shell>
+  );
 }
 
 function Shell({ accent, children }: { accent: string | null; children: React.ReactNode }) {

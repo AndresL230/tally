@@ -25,10 +25,6 @@ async function entryResponse(
   return entry;
 }
 
-function isUniqueViolation(err: unknown, constraint: string): boolean {
-  return err instanceof Error && err.message.includes(constraint);
-}
-
 export function registerMutations(app: Hono<AppContext>): void {
   app.onError((err, c) => {
     if (err instanceof ValidationError) {
@@ -136,6 +132,13 @@ export function registerMutations(app: Hono<AppContext>): void {
     const occurredOn = assertDate(body.occurred_on, "occurred_on");
 
     const originalId = c.req.param("expenseId");
+    // Fast path for the common already-voided case (the insert-failure
+    // fallback below covers the race).
+    const priorReversal = await c.env.DB.prepare(
+      "SELECT id FROM expenses WHERE reverses_id = ?1 AND id != ?2",
+    )
+      .bind(originalId, id)
+      .first<{ id: string }>();
     const original = await c.env.DB.prepare(
       "SELECT * FROM expenses WHERE id = ?1 AND ledger_id = ?2",
     )
@@ -152,6 +155,9 @@ export function registerMutations(app: Hono<AppContext>): void {
     if (!original) return c.json({ error: "not found" }, 404);
     if (original.reverses_id) {
       return c.json({ error: "cannot void a void" }, 409);
+    }
+    if (priorReversal) {
+      return c.json({ error: "already voided" }, 409);
     }
 
     try {
@@ -189,7 +195,15 @@ export function registerMutations(app: Hono<AppContext>): void {
         return c.json({ error: "id already used" }, 409);
       }
     } catch (err) {
-      if (isUniqueViolation(err, "expenses.reverses_id")) {
+      // Don't trust the driver's error text alone: on any insert failure,
+      // check whether a reversal for this original exists — that's the
+      // "already voided" race — before rethrowing.
+      const reversal = await c.env.DB.prepare(
+        "SELECT id FROM expenses WHERE reverses_id = ?1",
+      )
+        .bind(original.id)
+        .first<{ id: string }>();
+      if (reversal) {
         return c.json({ error: "already voided" }, 409);
       }
       throw err;

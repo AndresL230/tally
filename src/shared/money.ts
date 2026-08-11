@@ -49,8 +49,8 @@ export function splitItems(
   if (payerEmail === otherEmail) {
     throw new Error("payer and other must be different people");
   }
-  if (!Number.isSafeInteger(totalCents)) {
-    throw new Error("total_cents must be an integer");
+  if (!Number.isSafeInteger(totalCents) || totalCents < 0) {
+    throw new Error("total_cents must be a non-negative integer");
   }
   let subtotal = 0;
   let otherHalfUnits = 0;

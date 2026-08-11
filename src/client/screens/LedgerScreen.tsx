@@ -40,7 +40,11 @@ export function LedgerScreen({
 
   const settledLine = (() => {
     if (!entries.length) return "Nothing owed either way.";
-    const receipts = entries.filter((e) => e.kind === "expense").length;
+    // Voided pairs (original + reversal) net to nothing — don't count them
+    // as receipts in the settled summary.
+    const receipts = entries.filter(
+      (e) => e.kind === "expense" && !e.expense?.reverses_id && !e.expense?.reversed_by,
+    ).length;
     const payments = entries.filter((e) => e.kind === "settlement").length;
     const since = shortDate(entries[entries.length - 1]!.occurred_on);
     return `Square since ${since}. ${capitalize(numWord(receipts))} receipt${receipts === 1 ? "" : "s"}, ${numWord(payments)} payment${payments === 1 ? "" : "s"}.`;

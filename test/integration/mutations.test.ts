@@ -443,6 +443,50 @@ describe("idempotency: repeat POST with the same id is a no-op", () => {
     expect(otherDetail.entries).toHaveLength(0);
   });
 
+  it("settlement: same id posted to a DIFFERENT ledger => 409, nothing written or echoed", async () => {
+    const otherLedger = await insertLedger(ALEX, SAM);
+    const id = crypto.randomUUID();
+    const first = await post(
+      `/api/ledgers/${ledgerId}/settlements`,
+      JORDAN,
+      settlementBody({ id }),
+    );
+    expect(first.status).toBe(201);
+
+    const crossPost = await post(
+      `/api/ledgers/${otherLedger}/settlements`,
+      ALEX,
+      settlementBody({ id, from_email: SAM, to_email: ALEX }),
+    );
+    expect(crossPost.status).toBe(409);
+    const body = (await crossPost.json()) as { error?: string; entry?: unknown };
+    expect(body.entry).toBeUndefined();
+    expect(typeof body.error).toBe("string");
+
+    expect(await countRows("settlements")).toBe(1);
+    expect((await getDetail(otherLedger, ALEX)).entries).toHaveLength(0);
+  });
+
+  it("void: reversal id colliding with an existing expense id => 409, no reversal written", async () => {
+    const e1 = expenseBody();
+    const e2 = expenseBody();
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, e1)).status).toBe(201);
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, e2)).status).toBe(201);
+
+    // Try to void e1 using e2's id for the reversal entry: the id exists
+    // but is not e1's reversal, so this must 409 without echoing anything.
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${e1["id"]}/void`, ALEX, {
+      id: e2["id"],
+      occurred_on: "2026-08-03",
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as { error?: string; entry?: unknown };
+    expect(body.entry).toBeUndefined();
+
+    expect(await countRows("expenses")).toBe(2);
+    expect(await balanceOf(ledgerId, ALEX)).toBe(1400); // both intact, no reversal
+  });
+
   it("settlement: byte-identical repeat => 200, exactly one row, balance unchanged", async () => {
     const body = settlementBody({ from_email: JORDAN, to_email: ALEX, amount_cents: 500 });
     const first = await post(`/api/ledgers/${ledgerId}/settlements`, JORDAN, body);

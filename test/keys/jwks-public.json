@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "n": "vjbSNrtnbt2yT4NFccMxPmcELdnVhblFqXDZPA9hLE4zlu21f7gj8VxRrzPIfTdHd7N8JCETrlFArni3nZBCXEphRhCktjeL9FWhV08tirvSwnmORp7Qxq-yLkHEJfWU4IyDIc8jMBxJOcZtFHTBFh70Uh9IxYAIFDeNVjRx-I0DNiWgD0Qut4vG12dWXenH8PqHXzZa2l3b61S8Pn3pz738ZbKQVKK0XK9SaX8RCCPkLHr9KFEa3D9xbiLDWW7vx4ebmVuQxeoDGco2oiBGmhO4SGu1Fr1dlHNicqTA4puLo8Ycf5RQq7IIBIS5PYp7mnCsNHxzmjOoULcw-TjPyw",
+      "e": "AQAB",
+      "kid": "tally-test-key",
+      "alg": "RS256",
+      "use": "sig"
+    }
+  ]
+}

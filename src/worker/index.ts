@@ -2,11 +2,14 @@ import { Hono } from "hono";
 import type { AppContext } from "./env";
 import { requireUser } from "./auth";
 import { ledgerDetail, ledgerForMember, listLedgers } from "./db";
+import { registerMutations } from "./mutations";
 
 const app = new Hono<AppContext>();
 
 // Every /api/* request must carry a verified Access identity.
 app.use("/api/*", requireUser);
+
+registerMutations(app);
 
 app.get("/api/me", async (c) => {
   const email = c.get("email");

@@ -1,8 +1,9 @@
+import { useState } from "react";
 import type { CSSProperties } from "react";
 import type { ApiEntry, LedgerDetail } from "../../shared/types";
 import { viewerDelta } from "../../shared/ledger";
 import { moneyAbs, moneySigned, runningLabel, shortDate } from "../../shared/format";
-import { ARCHIVO, INK, MONO, MUTED_3, MUTED_4, MUTED_5, MUTED_6, PAPER, SERIF, type Colors } from "../theme";
+import { ARCHIVO, INK, MONO, MUTED_2, MUTED_3, MUTED_4, MUTED_5, MUTED_6, PAPER, SERIF, type Colors } from "../theme";
 
 const NUM_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
 function numWord(n: number): string {
@@ -18,7 +19,8 @@ export interface LedgerScreenProps {
   friendName: string;
   onOpenEntry?: (entry: ApiEntry) => void;
   onSettle?: () => void;
-  onAddReceipt?: () => void;
+  /** The add-receipt sheet's "Enter it by hand" action. */
+  onEnterByHand?: () => void;
 }
 
 export function LedgerScreen({
@@ -27,8 +29,9 @@ export function LedgerScreen({
   friendName: F,
   onOpenEntry,
   onSettle,
-  onAddReceipt,
+  onEnterByHand,
 }: LedgerScreenProps) {
+  const [sheet, setSheet] = useState(false);
   const { entries, viewer, ledger } = detail;
   const v = (cents: number) => viewerDelta(cents, viewer, ledger);
   const balance = entries.length ? v(entries[entries.length - 1]!.running_cents) : 0;
@@ -49,12 +52,16 @@ export function LedgerScreen({
       const run = v(e.running_cents);
       const pos = dv > 0;
       const isPay = e.kind === "settlement";
+      // Reversal expenses render italic + muted like settle rows; the
+      // voided originals keep their layout at reduced opacity.
+      const isVoidRow = !!e.expense?.reverses_id;
+      const isVoided = !!e.expense?.reversed_by;
       const sub = isPay
         ? e.settlement?.from_email === viewer
           ? `you paid ${F}`
           : `${F} paid you`
         : `${shortDate(e.occurred_on)} · ${e.expense?.payer === viewer ? "you paid" : `${F} paid`}`;
-      return { e, dv, run, pos, isPay, sub };
+      return { e, dv, run, pos, isPay, isVoidRow, isVoided, sub };
     })
     .reverse();
 
@@ -98,7 +105,7 @@ export function LedgerScreen({
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", borderTop: "1px solid rgba(0,0,0,.09)" }}>
         {entries.length ? (
           <div>
-            {rows.map(({ e, dv, run, pos, isPay, sub }) => (
+            {rows.map(({ e, dv, run, pos, isPay, isVoidRow, isVoided, sub }) => (
               <button
                 key={e.id}
                 onClick={onOpenEntry ? () => onOpenEntry(e) : undefined}
@@ -114,6 +121,7 @@ export function LedgerScreen({
                   background: "transparent",
                   textAlign: "left",
                   cursor: "pointer",
+                  opacity: isVoided ? 0.55 : 1,
                 }}
               >
                 <span style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
@@ -123,28 +131,28 @@ export function LedgerScreen({
                       height: 9,
                       borderRadius: "50%",
                       flex: "none",
-                      background: isPay ? "transparent" : pos ? C.me : C.fr,
-                      border: isPay ? "1px solid rgba(0,0,0,.3)" : 0,
+                      background: isPay || isVoidRow ? "transparent" : pos ? C.me : C.fr,
+                      border: isPay || isVoidRow ? "1px solid rgba(0,0,0,.3)" : 0,
                     }}
                   />
                   <span
                     style={{
-                      font: `${isPay ? "400" : "500"} 15px ${ARCHIVO}`,
-                      color: isPay ? MUTED_3 : INK,
-                      fontStyle: isPay ? "italic" : "normal",
+                      font: `${isPay || isVoidRow ? "400" : "500"} 15px ${ARCHIVO}`,
+                      color: isPay || isVoidRow ? MUTED_3 : INK,
+                      fontStyle: isPay || isVoidRow ? "italic" : "normal",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {isPay ? "Settle up" : e.expense?.merchant}
+                    {isPay ? "Settle up" : isVoidRow ? `Void — ${e.expense?.merchant}` : e.expense?.merchant}
                   </span>
                 </span>
                 <span
                   style={{
                     font: `500 15px ${MONO}`,
                     fontVariantNumeric: "tabular-nums",
-                    color: isPay ? MUTED_4 : pos ? C.me : C.fr,
+                    color: isPay || isVoidRow ? MUTED_4 : pos ? C.me : C.fr,
                   }}
                 >
                   {moneySigned(dv)}
@@ -205,7 +213,7 @@ export function LedgerScreen({
           Settle up
         </button>
         <button
-          onClick={onAddReceipt}
+          onClick={() => setSheet(true)}
           style={{
             flex: 1,
             height: 58,
@@ -225,6 +233,67 @@ export function LedgerScreen({
           Add receipt
         </button>
       </div>
+
+      {sheet && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(20,17,12,.42)",
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center",
+            zIndex: 10,
+          }}
+        >
+          <div onClick={() => setSheet(false)} style={{ position: "absolute", inset: 0 }} />
+          <div
+            style={{
+              position: "relative",
+              width: "100%",
+              maxWidth: 410,
+              background: PAPER,
+              borderRadius: "22px 22px 36px 36px",
+              padding: "20px 18px 22px",
+              animation: "tapeIn .22s ease both",
+            }}
+          >
+            <div
+              style={{
+                font: `600 10px ${ARCHIVO}`,
+                letterSpacing: ".16em",
+                textTransform: "uppercase",
+                color: MUTED_3,
+                marginBottom: 14,
+              }}
+            >
+              Add a receipt
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {/* TODO(M2): the "Take a photo" (accent-filled, 60px) and
+                  "Choose from library" (outline, 60px) actions from the
+                  mockup land here with the receipt pipeline. */}
+              <button
+                onClick={() => {
+                  setSheet(false);
+                  onEnterByHand?.();
+                }}
+                style={{
+                  height: 52,
+                  borderRadius: 16,
+                  border: 0,
+                  background: "transparent",
+                  color: MUTED_2,
+                  font: `600 15px ${ARCHIVO}`,
+                  cursor: "pointer",
+                }}
+              >
+                Enter it by hand
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

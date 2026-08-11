@@ -1,0 +1,7 @@
+# Copy to .dev.vars for local development (never committed, never deployed).
+#
+# DEV_ALLOW_USER bypasses Access verification for LOCALHOST requests only,
+# because wrangler dev has no Cloudflare Access in front of it. The seed data
+# uses alex@example.com as the primary viewer.
+# NEVER set this variable on a deployed Worker.
+DEV_ALLOW_USER=alex@example.com

@@ -1,0 +1,36 @@
+{
+  "name": "tally",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "wrangler dev",
+    "dev:client": "vite",
+    "deploy": "npm run build && wrangler deploy",
+    "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.client.json && tsc -p tsconfig.test.json",
+    "test": "npm run typecheck && vitest run",
+    "test:watch": "vitest",
+    "migrate:local": "wrangler d1 migrations apply tally --local",
+    "migrate:remote": "wrangler d1 migrations apply tally --remote",
+    "seed": "npm run migrate:local && wrangler d1 execute tally --local --file seed/seed.sql"
+  },
+  "dependencies": {
+    "hono": "^4.13.1",
+    "jose": "^6.2.8"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.21.1",
+    "@cloudflare/workers-types": "^5.20260811.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "fast-check": "^4.9.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.121.0"
+  }
+}

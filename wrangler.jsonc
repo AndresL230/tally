@@ -1,0 +1,39 @@
+{
+  // Tally — one Worker: static assets + /api/* via Hono.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tally",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2025-06-01",
+  "assets": {
+    "directory": "dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tally",
+      // Placeholder — replace with the real id after `wrangler d1 create tally`
+      // (see HUMAN_TODO.md). Local dev and tests ignore this value.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "RECEIPTS",
+      "bucket_name": "tally-receipts"
+    }
+  ],
+  "vars": {
+    // Cloudflare Access team domain, e.g. "myteam.cloudflareaccess.com"
+    "ACCESS_TEAM_DOMAIN": "REPLACE-ME.cloudflareaccess.com",
+    // The Access application AUD tag (Zero Trust → Access → Applications → your app → Overview)
+    "ACCESS_AUD": "REPLACE-ME",
+    // Cloudflare account id + AI Gateway id for Anthropic extraction calls (M2)
+    "AI_GATEWAY_ACCOUNT_ID": "REPLACE-ME",
+    "AI_GATEWAY_ID": "REPLACE-ME"
+  }
+  // Secrets (never in this file): ANTHROPIC_API_KEY via `wrangler secret put ANTHROPIC_API_KEY`
+}

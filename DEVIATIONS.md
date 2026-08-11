@@ -38,3 +38,12 @@ supplies a local identity. It is honored only for localhost/127.0.0.1
 requests, documented as never-deploy, and does not exist in production
 config. The spec's "the app boots assuming an authenticated request" is
 preserved in production; this is the local stand-in.
+
+## D6. Schema is stricter than the spec's verbatim DDL
+
+Hardening added beyond the spec's column list: `CHECK (person_a < person_b)`
+on ledgers (enforces the canonical ordering the spec states in prose),
+`CHECK` enums on `expenses.method` and `receipts.status`, `UNIQUE` on
+`expenses.reverses_id` (an entry can be voided exactly once), NOT NULLs on
+required columns, and foreign keys (including `expenses.receipt_id ->
+receipts(id)`). Same data model, fewer representable corruptions.

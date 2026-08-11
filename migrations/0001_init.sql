@@ -21,6 +21,22 @@ CREATE TABLE ledgers (
   CHECK (person_a < person_b)
 );
 
+CREATE TABLE receipts (
+  id           TEXT PRIMARY KEY,
+  ledger_id    TEXT NOT NULL REFERENCES ledgers(id),
+  r2_key       TEXT,
+  sha256       TEXT NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN
+                 ('uploaded','extracting','needs_review','posted','failed','discarded')),
+  raw_json     TEXT,
+  merchant     TEXT,
+  purchased_on TEXT,
+  total_cents  INTEGER,
+  uploaded_by  TEXT,
+  created_at   INTEGER,
+  UNIQUE (ledger_id, sha256)                     -- same bytes twice = one receipt
+);
+
 CREATE TABLE expenses (
   id                TEXT PRIMARY KEY,            -- client-generated UUID (idempotency key)
   ledger_id         TEXT NOT NULL REFERENCES ledgers(id),
@@ -31,7 +47,7 @@ CREATE TABLE expenses (
   other_share_cents INTEGER NOT NULL,            -- the non-payer's share
   method            TEXT NOT NULL CHECK (method IN ('items','percent','manual')),
   note              TEXT,
-  receipt_id        TEXT,
+  receipt_id        TEXT REFERENCES receipts(id),
   extra_cents       INTEGER,                     -- total - items subtotal; display metadata
   created_by        TEXT NOT NULL,
   created_at        INTEGER NOT NULL,
@@ -49,22 +65,6 @@ CREATE TABLE settlements (
   created_at   INTEGER NOT NULL
 );
 CREATE INDEX idx_settlements_ledger ON settlements(ledger_id);
-
-CREATE TABLE receipts (
-  id           TEXT PRIMARY KEY,
-  ledger_id    TEXT NOT NULL REFERENCES ledgers(id),
-  r2_key       TEXT,
-  sha256       TEXT NOT NULL,
-  status       TEXT NOT NULL CHECK (status IN
-                 ('uploaded','extracting','needs_review','posted','failed','discarded')),
-  raw_json     TEXT,
-  merchant     TEXT,
-  purchased_on TEXT,
-  total_cents  INTEGER,
-  uploaded_by  TEXT,
-  created_at   INTEGER,
-  UNIQUE (ledger_id, sha256)                     -- same bytes twice = one receipt
-);
 
 CREATE TABLE receipt_items (
   id          TEXT PRIMARY KEY,

@@ -62,6 +62,8 @@ export async function getUser(
     const { payload } = await jwtVerify(token, keySource(env), {
       issuer: `https://${env.ACCESS_TEAM_DOMAIN}`,
       audience: env.ACCESS_AUD,
+      algorithms: ["RS256"],
+      requiredClaims: ["exp", "email"],
     });
     const email = payload["email"];
     if (typeof email !== "string" || email.length === 0) return null;

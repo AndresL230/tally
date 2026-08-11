@@ -28,6 +28,11 @@ export default defineConfig(async () => {
             ACCESS_JWKS: jwks,
             ACCESS_AUD: "test-aud",
             ACCESS_TEAM_DOMAIN: "test.cloudflareaccess.com",
+            // Explicit value so a developer's gitignored .dev.vars can never
+            // leak into test outcomes. The bypass only fires for
+            // localhost-host requests; regular tests use https://tally.test,
+            // so both guard branches are covered deliberately in auth tests.
+            DEV_ALLOW_USER: "devuser@example.com",
           },
         },
       }),
@@ -35,6 +40,17 @@ export default defineConfig(async () => {
     test: {
       include: ["test/**/*.test.ts"],
       setupFiles: ["./test/apply-migrations.ts"],
+      // jose's negative verification paths (unknown kid, bad signature)
+      // reject inside workerd in a way vitest double-reports even though
+      // src/worker/auth.ts awaits and catches them (requests still get their
+      // 401 — asserted in auth tests). Swallow exactly that family; anything
+      // else stays fatal.
+      onUnhandledError(err: unknown) {
+        const code = (err as { code?: string })?.code ?? "";
+        if (typeof code === "string" && (code.startsWith("ERR_JWKS_") || code.startsWith("ERR_JWS_"))) {
+          return false;
+        }
+      },
       // Test files share one D1 instance; run them one at a time so the
       // between-test table resets can't race across files.
       fileParallelism: false,

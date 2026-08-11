@@ -7,6 +7,8 @@ export interface JwtOptions {
   iss?: string;
   expiresIn?: number; // seconds; negative = already expired
   omitEmail?: boolean;
+  kid?: string; // override the key id in the protected header
+  omitExp?: boolean;
 }
 
 /** Sign a JWT the way Cloudflare Access would, using the committed test key. */
@@ -14,13 +16,13 @@ export async function accessJwt(email: string, opts: JwtOptions = {}): Promise<s
   const key = await importJWK(privateJwk as JsonWebKey, "RS256");
   const now = Math.floor(Date.now() / 1000);
   const expiresIn = opts.expiresIn ?? 600;
-  let jwt = new SignJWT(opts.omitEmail ? {} : { email })
-    .setProtectedHeader({ alg: "RS256", kid: "tally-test-key" })
+  const jwt = new SignJWT(opts.omitEmail ? {} : { email })
+    .setProtectedHeader({ alg: "RS256", kid: opts.kid ?? "tally-test-key" })
     .setIssuer(opts.iss ?? `https://${env.ACCESS_TEAM_DOMAIN}`)
     .setAudience(opts.aud ?? env.ACCESS_AUD)
     .setIssuedAt(now)
-    .setExpirationTime(now + expiresIn)
     .setSubject(`test-sub-${email}`);
+  if (!opts.omitExp) jwt.setExpirationTime(now + expiresIn);
   return await jwt.sign(key);
 }
 

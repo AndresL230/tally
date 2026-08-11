@@ -19,9 +19,10 @@ export function moneyAbs(cents: number): string {
   return `$${dollars(cents)}`;
 }
 
-/** "+$12.34" / "−$12.34" (U+2212), as the ledger rows render deltas. */
+/** "+$12.34" / "−$12.34" (U+2212), as the ledger rows render deltas.
+ *  Zero renders "−$0.00", matching the mockup (`pos = dv > 0`). */
 export function moneySigned(cents: number): string {
-  return `${cents >= 0 ? "+" : "−"}$${dollars(cents)}`;
+  return `${cents > 0 ? "+" : "−"}$${dollars(cents)}`;
 }
 
 /** Ledger-row running balance: "even" at zero, else the magnitude. */
@@ -31,7 +32,7 @@ export function runningLabel(cents: number): string {
 
 /** "Aug 6" from 'YYYY-MM-DD' without Date-object timezone hazards. */
 export function shortDate(iso: string): string {
-  const [y, m, d] = iso.split("-");
+  const [, m, d] = iso.split("-");
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const mi = Number(m) - 1;
   return `${months[mi] ?? "?"} ${Number(d)}`;

@@ -102,6 +102,33 @@ makes them visible in the app.
 `seed/seed.sql` is demo data keyed to `alex@example.com`. For production
 just start using the app; there is nothing to seed.
 
+## 9. M4 manual phone checklist (after steps 1-6)
+
+Run through this on a REAL phone against the deployed, Access-fronted URL.
+Check each item off:
+
+- [ ] **Access OTP login**: open the app URL in the phone browser; enter
+      your email; the 6-digit code arrives and logs you in. (Your email
+      must be in the Access policy — step 4.)
+- [ ] **Install**: browser menu -> Add to Home Screen. The tally-slash
+      icon appears; launching opens standalone (no browser chrome), paper
+      background edge to edge.
+- [ ] **Camera**: Add receipt -> Take a photo opens the camera directly
+      (capture=environment); shooting a receipt lands on the reading
+      screen and then confirm.
+- [ ] **Library**: Choose from library picks an existing photo.
+- [ ] **Live extraction end-to-end** (step 6 done): a real receipt photo
+      extracts merchant/date/total/items; assign a couple of items; the
+      owed line moves per tap; commit; the balance updates. Photograph the
+      SAME receipt again: the app says it's already on the ledger.
+- [ ] **Expired session in standalone mode**: Zero Trust -> My Team ->
+      Users -> revoke your session (or wait out the 1-month duration).
+      Reopen the installed app: it must bounce through the Access login
+      and come back working — not hang on a blank screen. (The client
+      reloads the document when an API call gets redirected to Access.)
+- [ ] **Both-viewers check**: log in as your friend on their phone; the
+      same ledger shows the same magnitude with the direction flipped.
+
 ---
 
 ## Milestone gate status affected by this file
@@ -112,5 +139,7 @@ just start using the app; there is nothing to seed.
 - **M2** live extraction: blocked on step 6 (fixtures fully cover the
   extraction contract in tests; the live path is gated on the secret's
   presence).
-- **M4** manual phone checklist: blocked on steps 3–5 (needs a real
-  Access-fronted URL on a phone).
+- **M4** manual phone checklist (step 9): blocked on steps 3–5 (needs a
+  real Access-fronted URL on a phone). Everything else in M4 (manifest,
+  icons, camera capture, dev gallery, expired-session reload handling) is
+  built and verified locally.

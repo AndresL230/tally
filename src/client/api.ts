@@ -73,6 +73,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
+  // Expired Cloudflare Access session: API fetches get redirected to the
+  // hosted login (an HTML page). In standalone/PWA mode nothing else would
+  // ever re-trigger login, so reload the document and let Access take over.
+  const contentType = res.headers.get("content-type") ?? "";
+  if (
+    (res.redirected && new URL(res.url).hostname.endsWith("cloudflareaccess.com")) ||
+    (res.ok && !contentType.includes("application/json"))
+  ) {
+    window.location.reload();
+    // Unreachable in practice; keeps the promise from resolving with junk.
+    throw new ApiError(401, "session expired");
+  }
   if (!res.ok) {
     let message = res.statusText;
     try {

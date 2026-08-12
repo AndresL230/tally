@@ -93,6 +93,15 @@ Two steps, both required:
    policy (Zero Trust dashboard) so they can log in at all.
 2. **Create the ledger**: in the app, "New ledger" → enter their email.
 
+## PWA
+
+The client ships a manifest + icons and installs to the home screen
+(standalone display). The dev-only state gallery — the mockup's demo-jump
+sidebar reborn as a QA tool — is served ONLY by `npm run dev:client` at
+`http://localhost:5173/#gallery` and is excluded from production bundles.
+When the Access session expires inside the installed app, the client
+reloads the document so Access can host its login again.
+
 ## Repository map
 
 ```

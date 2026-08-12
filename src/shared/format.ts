@@ -30,18 +30,25 @@ export function runningLabel(cents: number): string {
   return cents === 0 ? "even" : moneyAbs(cents);
 }
 
-/** "Aug 6" from 'YYYY-MM-DD' without Date-object timezone hazards. */
-export function shortDate(iso: string): string {
-  const [, m, d] = iso.split("-");
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function monthDay(m: string | undefined, d: string | undefined): string {
   const mi = Number(m) - 1;
-  return `${months[mi] ?? "?"} ${Number(d)}`;
+  return `${MONTHS[mi] ?? "?"} ${Number(d)}`;
 }
 
-/** "Aug 6, 2026" from 'YYYY-MM-DD'. */
+/** "Aug 6" from 'YYYY-MM-DD' without Date-object timezone hazards.
+ *  Dates outside the current year carry it: "Aug 6, 2025". */
+export function shortDate(iso: string, currentYear: number = new Date().getFullYear()): string {
+  const [y, m, d] = iso.split("-");
+  const base = monthDay(m, d);
+  return Number(y) === currentYear ? base : `${base}, ${y}`;
+}
+
+/** "Aug 6, 2026" from 'YYYY-MM-DD' — always shows the year. */
 export function longDate(iso: string): string {
-  const y = iso.split("-")[0];
-  return `${shortDate(iso)}, ${y}`;
+  const [y, m, d] = iso.split("-");
+  return `${monthDay(m, d)}, ${y}`;
 }
 
 /** Parse a user-typed dollar amount ("12.5", "$12.50") into cents, integer math only. */

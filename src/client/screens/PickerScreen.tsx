@@ -77,6 +77,18 @@ export function PickerScreen({
               Edit your name and color ›
             </button>
           )}
+          <a
+            href="/welcome"
+            style={{
+              display: "inline-block",
+              marginTop: 12,
+              font: `500 13px ${ARCHIVO}`,
+              color: MUTED_3,
+              textDecoration: "none",
+            }}
+          >
+            About Tally ›
+          </a>
         </div>
       </div>
     </div>

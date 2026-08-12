@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tally — a private ledger for two</title>
+    <meta name="description" content="One ledger, two people. Photograph the receipt, mark who got what, settle when it suits you." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icon-192.png" type="image/png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Landing page ported from the Claude Design project (Tally Landing +
+         the app mock's mobile landing state). Desktop-first; the media query
+         tightens it to the mobile design's scale. */
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #e7e3d9; -webkit-font-smoothing: antialiased; font-family: Archivo, system-ui, sans-serif; color: #211f1c; }
+      a.btn-dark { display: inline-flex; align-items: center; white-space: nowrap; height: 46px; padding: 0 22px; border-radius: 14px; background: #211f1c; color: #f7f5ef; font: 600 15px Archivo; text-decoration: none; }
+      a.btn-dark:hover { background: #3a352e; }
+      a.btn-accent { display: inline-flex; align-items: center; white-space: nowrap; height: 58px; padding: 0 30px; border-radius: 16px; background: #0a8a9b; color: #fff; font: 600 17px Archivo; text-decoration: none; }
+      a.btn-accent:hover { background: #076d7b; }
+      .serif { font-family: 'Instrument Serif', Georgia, serif; font-weight: 400; }
+      .mono { font-family: 'IBM Plex Mono', monospace; }
+      .wrap { max-width: 1120px; margin: 0 auto; padding-left: 32px; padding-right: 32px; }
+      .card-caption { display: none; }
+      @media (max-width: 720px) {
+        .wrap { padding-left: 24px; padding-right: 24px; }
+        header.wrap { padding-top: 18px; padding-bottom: 8px; }
+        .hero { padding-top: 26px !important; padding-bottom: 48px !important; gap: 36px !important; }
+        .hero h1 { font-size: 46px !important; }
+        .hero p.sub { font-size: 16px !important; }
+        .steps-pad { padding-top: 44px !important; padding-bottom: 44px !important; gap: 28px !important; }
+        .pair-pad { padding-top: 48px !important; padding-bottom: 48px !important; gap: 36px !important; }
+        .cta-pad { padding-top: 48px !important; padding-bottom: 48px !important; }
+        .card-caption { display: block; margin-top: 10px; font: 400 11.5px 'IBM Plex Mono', monospace; color: #8a857c; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="wrap" style="padding-top: 26px; padding-bottom: 26px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap">
+      <div style="display: flex; align-items: center; gap: 13px">
+        <svg width="34" height="24" viewBox="0 0 64 48" fill="none" aria-hidden="true" style="display: block; flex: none">
+          <line x1="8" y1="5" x2="8" y2="43" stroke="#211f1c" stroke-width="6" stroke-linecap="round" />
+          <line x1="22" y1="5" x2="22" y2="43" stroke="#211f1c" stroke-width="6" stroke-linecap="round" />
+          <line x1="36" y1="5" x2="36" y2="43" stroke="#211f1c" stroke-width="6" stroke-linecap="round" />
+          <line x1="50" y1="5" x2="50" y2="43" stroke="#211f1c" stroke-width="6" stroke-linecap="round" />
+          <line x1="2" y1="34" x2="58" y2="12" stroke="#0a8a9b" stroke-width="6" stroke-linecap="round" />
+        </svg>
+        <span class="serif" style="font-size: 26px">Tally</span>
+      </div>
+      <a class="btn-dark" href="/">Sign in</a>
+    </header>
+
+    <section class="wrap hero" style="padding-top: 44px; padding-bottom: 80px; display: flex; gap: 64px; align-items: center; flex-wrap: wrap">
+      <div style="flex: 1 1 420px; min-width: 300px">
+        <h1 class="serif" style="margin: 0; font-size: clamp(44px, 6vw, 76px); line-height: 1; letter-spacing: -0.01em; text-wrap: pretty">
+          One ledger.<br />Two people.<br /><span style="font-style: italic; color: #0a8a9b">Zero arithmetic.</span>
+        </h1>
+        <p class="sub" style="margin: 24px 0 0; font: 400 19px/1.55 Archivo; color: #4a453d; max-width: 440px; text-wrap: pretty">
+          Photograph the receipt, tap the items that were yours, and the balance keeps itself. Settle up whenever it
+          suits you — a few weeks of dinners becomes one payment.
+        </p>
+        <div style="margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center">
+          <a class="btn-accent" href="/">Open your ledger</a>
+          <span class="mono" style="display: inline-flex; align-items: center; font-size: 14px; color: #8a857c">Made for exactly two accounts.</span>
+        </div>
+      </div>
+
+      <div style="flex: 0 1 380px; min-width: 300px; margin: 0 auto">
+        <div style="background: #fbfaf6; border: 1px solid rgba(0, 0, 0, 0.1); border-bottom: 0; border-radius: 8px 8px 0 0; box-shadow: 0 24px 50px rgba(30, 24, 14, 0.16); overflow: hidden; transform: rotate(1.2deg)">
+          <div style="padding: 18px 20px 14px; border-bottom: 1px dashed rgba(0, 0, 0, 0.2)">
+            <div style="font: 600 9.5px Archivo; letter-spacing: 0.16em; text-transform: uppercase; color: #8a857c">You and Jordan</div>
+            <div class="serif" style="margin-top: 8px; font-size: 42px; line-height: 1; font-variant-numeric: tabular-nums">$124.50</div>
+            <div style="margin-top: 6px; font: 600 14px Archivo; color: #0a8a9b">Jordan owes you</div>
+          </div>
+          <div style="display: flex; align-items: stretch">
+            <span style="width: 9px; flex: none; background: #0a8a9b"></span>
+            <span style="flex: 1; display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid rgba(0, 0, 0, 0.07); background: rgba(10, 138, 155, 0.09)">
+              <span style="flex: 1; min-width: 0"><span style="display: block; font: 500 15px Archivo">Chicken Kiev</span><span class="mono" style="display: block; margin-top: 2px; font-size: 11px; font-weight: 500; color: #0a7284">Yours</span></span>
+              <span class="mono" style="font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums">$32.00</span>
+            </span>
+          </div>
+          <div style="display: flex; align-items: stretch">
+            <span style="width: 9px; flex: none; background: linear-gradient(180deg, #0a8a9b 0 50%, #2c2823 50% 100%)"></span>
+            <span style="flex: 1; display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid rgba(0, 0, 0, 0.07); background: rgba(10, 138, 155, 0.04)">
+              <span style="flex: 1; min-width: 0"><span style="display: block; font: 500 15px Archivo">Pelmeni</span><span class="mono" style="display: block; margin-top: 2px; font-size: 11px; font-weight: 500; color: #6f6a61">$9.50 each</span></span>
+              <span class="mono" style="font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums">$19.00</span>
+            </span>
+          </div>
+          <div style="display: flex; align-items: stretch">
+            <span style="width: 9px; flex: none; background: #2c2823"></span>
+            <span style="flex: 1; display: flex; align-items: center; gap: 10px; padding: 13px 16px; background: rgba(44, 40, 35, 0.05)">
+              <span style="flex: 1; min-width: 0"><span style="display: block; font: 500 15px Archivo">Beet salad</span><span class="mono" style="display: block; margin-top: 2px; font-size: 11px; font-weight: 500; color: #4a453d">Jordan's</span></span>
+              <span class="mono" style="font-size: 14px; font-weight: 500; font-variant-numeric: tabular-nums">$12.00</span>
+            </span>
+          </div>
+          <div style="padding: 13px 16px; border-top: 1px dashed rgba(0, 0, 0, 0.2); display: flex; align-items: baseline">
+            <span style="font: 500 13px Archivo; color: #4a453d">Tax and tip, in proportion</span>
+            <span style="flex: 1; border-bottom: 1px dotted rgba(0, 0, 0, 0.22); margin: 0 8px; transform: translateY(-3px)"></span>
+            <span class="mono" style="font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums">$9.85</span>
+          </div>
+        </div>
+        <div style="height: 16px; transform: rotate(1.2deg); background-image: linear-gradient(45deg, transparent 33.4%, #fbfaf6 33.4% 66.6%, transparent 66.6%), linear-gradient(-45deg, transparent 33.4%, #fbfaf6 33.4% 66.6%, transparent 66.6%); background-size: 16px 32px; filter: drop-shadow(0 14px 20px rgba(30, 24, 14, 0.12))"></div>
+        <div class="card-caption">Color down the edge shows who got what.</div>
+      </div>
+    </section>
+
+    <section style="border-top: 1px solid rgba(0, 0, 0, 0.1); border-bottom: 1px solid rgba(0, 0, 0, 0.1); background: #f2efe7">
+      <div class="wrap steps-pad" style="padding-top: 64px; padding-bottom: 64px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 44px">
+        <div>
+          <div class="mono" style="font-size: 13px; font-weight: 600; color: #0a8a9b">01</div>
+          <h3 class="serif" style="margin: 10px 0 0; font-size: 28px; line-height: 1.1">Photograph the receipt</h3>
+          <p style="margin: 12px 0 0; font: 400 15.5px/1.55 Archivo; color: #4a453d; text-wrap: pretty">
+            Standing at the table, one hand. The merchant, date, total, and every line item are read off the photo in a
+            few seconds. Too dark to read? You type three fields and move on.
+          </p>
+        </div>
+        <div>
+          <div class="mono" style="font-size: 13px; font-weight: 600; color: #0a8a9b">02</div>
+          <h3 class="serif" style="margin: 10px 0 0; font-size: 28px; line-height: 1.1">Tap what was yours</h3>
+          <p style="margin: 12px 0 0; font: 400 15.5px/1.55 Archivo; color: #4a453d; text-wrap: pretty">
+            Every item starts as the other person's. One tap makes it yours, another makes it half each. Color down the
+            edge of the list shows who got what without reading a word. Tax and tip follow in proportion.
+          </p>
+        </div>
+        <div>
+          <div class="mono" style="font-size: 13px; font-weight: 600; color: #0a8a9b">03</div>
+          <h3 class="serif" style="margin: 10px 0 0; font-size: 28px; line-height: 1.1">Settle when it suits you</h3>
+          <p style="margin: 12px 0 0; font: 400 15.5px/1.55 Archivo; color: #4a453d; text-wrap: pretty">
+            The ledger keeps a running balance with every receipt on record — tap any entry to see exactly who got what.
+            One payment brings it back to even.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap pair-pad" style="padding-top: 72px; padding-bottom: 72px; display: flex; gap: 56px; align-items: center; flex-wrap: wrap">
+      <div style="flex: 1 1 380px; min-width: 300px">
+        <h2 class="serif" style="margin: 0; font-size: clamp(32px, 4vw, 48px); line-height: 1.06; text-wrap: pretty">Built for the pair of you, and nobody else.</h2>
+        <div style="margin-top: 26px; display: flex; flex-direction: column; gap: 16px; max-width: 460px">
+          <div style="display: flex; gap: 14px; align-items: baseline"><span class="mono" style="flex: none; width: 22px; font-size: 13px; font-weight: 600; color: #0a8a9b">—</span><p style="margin: 0; font: 400 16px/1.55 Archivo; color: #4a453d">No groups, no invites, no expense categories. Two accounts and one number between them.</p></div>
+          <div style="display: flex; gap: 14px; align-items: baseline"><span class="mono" style="flex: none; width: 22px; font-size: 13px; font-weight: 600; color: #0a8a9b">—</span><p style="margin: 0; font: 400 16px/1.55 Archivo; color: #4a453d">Pick your color once. Everything of yours — items, amounts, the balance itself — is marked in it everywhere.</p></div>
+          <div style="display: flex; gap: 14px; align-items: baseline"><span class="mono" style="flex: none; width: 22px; font-size: 13px; font-weight: 600; color: #0a8a9b">—</span><p style="margin: 0; font: 400 16px/1.55 Archivo; color: #4a453d">Tax and tip split themselves in proportion to what each of you took. Edit either by hand when the receipt disagrees.</p></div>
+          <div style="display: flex; gap: 14px; align-items: baseline"><span class="mono" style="flex: none; width: 22px; font-size: 13px; font-weight: 600; color: #0a8a9b">—</span><p style="margin: 0; font: 400 16px/1.55 Archivo; color: #4a453d">Photo to committed entry in under twenty seconds, standing at the table.</p></div>
+        </div>
+      </div>
+      <div style="flex: 1 1 320px; min-width: 280px; display: flex; justify-content: center">
+        <div style="background: #fbfaf6; border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 8px; padding: 30px 34px; box-shadow: 0 20px 44px rgba(30, 24, 14, 0.12); transform: rotate(-1deg)">
+          <div style="font: 600 9.5px Archivo; letter-spacing: 0.16em; text-transform: uppercase; color: #8a857c; margin-bottom: 16px">The goal state</div>
+          <div style="display: flex; align-items: flex-end; gap: 20px">
+            <div class="serif" style="font-size: 72px; line-height: 0.9">Even.</div>
+            <svg width="66" height="46" viewBox="0 0 64 48" fill="none" aria-hidden="true" style="display: block; flex: none; margin-bottom: 8px">
+              <line x1="8" y1="5" x2="8" y2="43" stroke="#211f1c" stroke-width="6" stroke-linecap="round" />
+              <line x1="22" y1="5" x2="22" y2="43" stroke="#211f1c" stroke-width="6" stroke-linecap="round" />
+              <line x1="36" y1="5" x2="36" y2="43" stroke="#211f1c" stroke-width="6" stroke-linecap="round" />
+              <line x1="50" y1="5" x2="50" y2="43" stroke="#211f1c" stroke-width="6" stroke-linecap="round" />
+              <line x1="2" y1="34" x2="58" y2="12" stroke="#0a8a9b" stroke-width="6" stroke-linecap="round" />
+            </svg>
+          </div>
+          <div class="mono" style="margin-top: 12px; font-size: 14px; color: #8a857c">Square since Aug 11. Eight receipts, one payment.</div>
+        </div>
+      </div>
+    </section>
+
+    <section style="border-top: 1px solid rgba(0, 0, 0, 0.1)">
+      <div class="wrap cta-pad" style="padding-top: 72px; padding-bottom: 72px; text-align: center">
+        <h2 class="serif" style="margin: 0; font-size: clamp(34px, 4.5vw, 52px); line-height: 1.05">The next receipt is the whole setup.</h2>
+        <p style="margin: 16px auto 0; max-width: 420px; font: 400 16px/1.5 Archivo; color: #4a453d">
+          Both accounts already exist. Sign in, pick your color, and photograph whatever you just paid for.
+        </p>
+        <a class="btn-accent" href="/" style="margin-top: 30px">Open your ledger</a>
+      </div>
+    </section>
+
+    <footer style="border-top: 1px solid rgba(0, 0, 0, 0.1); background: #f2efe7">
+      <div class="wrap" style="padding-top: 26px; padding-bottom: 26px; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap">
+        <span class="mono" style="font-size: 13px; color: #8a857c">Tally — a private ledger for two.</span>
+        <span class="mono" style="font-size: 13px; color: #a8a298">Runs on Cloudflare Workers.</span>
+      </div>
+    </footer>
+  </body>
+</html>

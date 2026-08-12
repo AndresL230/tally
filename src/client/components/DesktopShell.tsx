@@ -130,6 +130,18 @@ export function DesktopShell({ accent, rail, railInert, onHome, children }: Desk
                 Edit your name and color ›
               </button>
             )}
+            <a
+              href="/welcome"
+              style={{
+                display: "inline-block",
+                marginTop: 12,
+                font: `500 13px ${ARCHIVO}`,
+                color: MUTED_3,
+                textDecoration: "none",
+              }}
+            >
+              About Tally ›
+            </a>
           </aside>
           <main
             style={{

@@ -3,8 +3,10 @@ import type { ApiEntry, ApiItem, ApiReceipt, LedgerDetail, LedgerSummary, UserPr
 import { otherMember, viewerDelta } from "../shared/ledger";
 import { ApiError, api } from "./api";
 import { downscaleImage } from "./image";
-import { ARCHIVO, MONO, SERIF, colorsFor } from "./theme";
+import { ARCHIVO, DEFAULT_ACCENT, MONO, SERIF, colorsFor } from "./theme";
 import { LedgerScreen } from "./screens/LedgerScreen";
+import { PickerScreen } from "./screens/PickerScreen";
+import { StartScreen } from "./screens/StartScreen";
 import { ManualScreen, type ManualCommit } from "./screens/ManualScreen";
 import { SettleScreen } from "./screens/SettleScreen";
 import { DetailScreen } from "./screens/DetailScreen";
@@ -30,6 +32,7 @@ type Boot =
 // reading -> confirm | percent | manual(photofail).
 type Screen =
   | { name: "ledger" }
+  | { name: "picker" }
   | { name: "manual"; reason: "byhand" | "photofail" }
   | { name: "settle" }
   | { name: "detail"; entryId: string }
@@ -58,6 +61,9 @@ export default function App() {
   const [flash, setFlash] = useState<string | null>(null);
   const [flow, setFlow] = useState<ReceiptFlow | null>(null);
   const [reading, setReading] = useState<ReadingPhase>(IDLE_PHASE);
+  // Onboarding accent preview: the picked swatch recolors the whole shell
+  // live (through colorsFor) before anything is saved.
+  const [startAccent, setStartAccent] = useState<string>(DEFAULT_ACCENT);
 
   // One idempotency id per user commit intent (contract rule 4). It is
   // minted on the first attempt and reused verbatim if that attempt fails
@@ -95,8 +101,10 @@ export default function App() {
     (async () => {
       try {
         const [me, { ledgers }] = await Promise.all([api.me(), api.ledgers()]);
-        const first = ledgers[0];
-        const detail = first ? await api.ledger(first.id) : null;
+        // Exactly one ledger boots straight into it; zero or several boot
+        // into the picker (detail stays null until one is opened).
+        const only = ledgers.length === 1 ? ledgers[0]! : null;
+        const detail = only ? await api.ledger(only.id) : null;
         setBoot({ phase: "ready", me, ledgers, detail });
       } catch (err) {
         setBoot({ phase: "error", message: err instanceof Error ? err.message : String(err) });
@@ -126,14 +134,85 @@ export default function App() {
     );
   }
 
-  const { me, detail } = boot;
+  const { me, ledgers, detail } = boot;
+
+  /** Merge fresher data into the ready boot state without clobbering it. */
+  const patchBoot = (patch: Partial<Extract<Boot, { phase: "ready" }>>) => {
+    setBoot((b) => (b.phase === "ready" ? { ...b, ...patch } : b));
+  };
+
+  // ---- Onboarding: no display name yet -> prefs first (decision B) --------
+  if (me.display_name === null) {
+    const preview = colorsFor(startAccent);
+    return (
+      <Shell accent={preview.me}>
+        {flash && <FlashNote accent={preview.me}>{flash}</FlashNote>}
+        <StartScreen
+          colors={preview}
+          accent={startAccent}
+          onPickAccent={setStartAccent}
+          busy={busy}
+          onSave={async (prefs) => {
+            if (busy) return;
+            setBusy(true);
+            try {
+              const updated = await api.updateMe(prefs);
+              setFlash(null);
+              patchBoot({ me: updated });
+            } catch (err) {
+              setFlash(describeError(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      </Shell>
+    );
+  }
+
   const colors = colorsFor(me.accent_color);
-  if (!detail) {
+
+  // ---- Picker: the root screen whenever no ledger is open -----------------
+  if (!detail || screen.name === "picker") {
     return (
       <Shell accent={colors.me}>
-        <div style={{ padding: "56px 30px", textAlign: "center" }}>
-          <div style={{ fontFamily: SERIF, fontSize: 26, lineHeight: 1.25 }}>No ledgers yet.</div>
-        </div>
+        {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
+        <PickerScreen
+          ledgers={ledgers}
+          viewerEmail={me.email}
+          colors={colors}
+          activeLedgerId={detail?.ledger.id ?? null}
+          createOpenByDefault={ledgers.length === 0}
+          onOpen={async (summary) => {
+            if (busy) return;
+            setBusy(true);
+            try {
+              const next = await api.ledger(summary.id);
+              patchBoot({ detail: next });
+              nav({ name: "ledger" });
+            } catch (err) {
+              setFlash(
+                err instanceof ApiError
+                  ? `That ledger didn't open (${err.message}). Try again.`
+                  : "That ledger didn't open — check the connection and try again.",
+              );
+            } finally {
+              setBusy(false);
+            }
+          }}
+          onCreate={async (friendEmail) => {
+            // Fresh UUID per attempt: the server is idempotent by PAIR, so a
+            // repeat returns 200 with the existing ledger — landing on it is
+            // the correct UX. Errors propagate to the picker's inline notice.
+            const { ledger } = await api.createLedger({ id: crypto.randomUUID(), friend_email: friendEmail });
+            const [{ ledgers: nextLedgers }, nextDetail] = await Promise.all([
+              api.ledgers(),
+              api.ledger(ledger.id),
+            ]);
+            patchBoot({ ledgers: nextLedgers, detail: nextDetail });
+            nav({ name: "ledger" });
+          }}
+        />
       </Shell>
     );
   }
@@ -144,8 +223,10 @@ export default function App() {
   const balance = lastEntry ? viewerDelta(lastEntry.running_cents, detail.viewer, detail.ledger) : 0;
 
   const refresh = async () => {
-    const next = await api.ledger(detail.ledger.id);
-    setBoot({ ...boot, detail: next });
+    // Refetch the open ledger AND the summary list, so the picker stays
+    // honest after any balance-changing mutation.
+    const [next, { ledgers: nextLedgers }] = await Promise.all([api.ledger(detail.ledger.id), api.ledgers()]);
+    patchBoot({ detail: next, ledgers: nextLedgers });
   };
 
   // The intent id is released the moment the POST succeeds (so a later
@@ -433,6 +514,19 @@ export default function App() {
         setFlow(null);
         nav({ name: "manual", reason: "byhand" });
       }}
+      onBackToPicker={
+        ledgers.length > 1
+          ? () => {
+              nav({ name: "picker" });
+              // Refresh the summaries behind the navigation so the list is
+              // current when it appears.
+              api
+                .ledgers()
+                .then(({ ledgers: nextLedgers }) => patchBoot({ ledgers: nextLedgers }))
+                .catch(() => {});
+            }
+          : undefined
+      }
     />
   );
 
@@ -543,20 +637,7 @@ export default function App() {
 
   return (
     <Shell accent={colors.me}>
-      {flash && (
-        <div
-          style={{
-            margin: "0 22px 8px",
-            borderLeft: `3px solid ${colors.me}`,
-            paddingLeft: 14,
-            font: `400 14px ${ARCHIVO}`,
-            lineHeight: 1.5,
-            color: "#4a453d",
-          }}
-        >
-          {flash}
-        </div>
-      )}
+      {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
       {body}
       {/* Hidden pickers behind the add-receipt sheet's photo buttons; the
           camera one is also what "Retake photo" re-opens. */}
@@ -570,6 +651,23 @@ export default function App() {
       />
       <input ref={libraryInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFilePicked} />
     </Shell>
+  );
+}
+
+function FlashNote({ accent, children }: { accent: string; children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        margin: "0 22px 8px",
+        borderLeft: `3px solid ${accent}`,
+        paddingLeft: 14,
+        font: `400 14px ${ARCHIVO}`,
+        lineHeight: 1.5,
+        color: "#4a453d",
+      }}
+    >
+      {children}
+    </div>
   );
 }
 

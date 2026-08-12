@@ -86,9 +86,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+export interface UpdateMeBody {
+  display_name: string;
+  /** Must be one of ACCENT_PALETTE (shared/prefs) or null. */
+  accent_color: string | null;
+}
+
+export interface CreateLedgerBody {
+  /** Client-generated UUID (contract rule 4). */
+  id: string;
+  friend_email: string;
+}
+
 export const api = {
   me: () => request<UserPrefs>("/api/me"),
+  updateMe: (body: UpdateMeBody) =>
+    request<UserPrefs>("/api/me", { method: "PUT", body: JSON.stringify(body) }),
   ledgers: () => request<{ ledgers: LedgerSummary[] }>("/api/ledgers"),
+  /** 201 new / 200 existing pair — both return the ledger to land on. */
+  createLedger: (body: CreateLedgerBody) =>
+    request<{ ledger: LedgerSummary }>("/api/ledgers", { method: "POST", body: JSON.stringify(body) }),
   ledger: (id: string) => request<LedgerDetail>(`/api/ledgers/${id}`),
   postExpense: (ledgerId: string, body: PostExpenseBody) =>
     request<{ entry: ApiEntry }>(`/api/ledgers/${ledgerId}/expenses`, {

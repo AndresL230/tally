@@ -25,6 +25,8 @@ export interface LedgerScreenProps {
   onChooseFromLibrary?: () => void;
   /** The add-receipt sheet's "Enter it by hand" action. */
   onEnterByHand?: () => void;
+  /** Present only when the user has more than one ledger: "‹ Ledgers". */
+  onBackToPicker?: () => void;
 }
 
 export function LedgerScreen({
@@ -36,6 +38,7 @@ export function LedgerScreen({
   onTakePhoto,
   onChooseFromLibrary,
   onEnterByHand,
+  onBackToPicker,
 }: LedgerScreenProps) {
   const [sheet, setSheet] = useState(false);
   const { entries, viewer, ledger } = detail;
@@ -78,6 +81,24 @@ export function LedgerScreen({
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div style={{ padding: "14px 22px 20px", flex: "none" }}>
+        {onBackToPicker && (
+          <button
+            onClick={onBackToPicker}
+            style={{
+              display: "block",
+              border: 0,
+              background: "transparent",
+              padding: 0,
+              marginBottom: 12,
+              font: `500 14px ${ARCHIVO}`,
+              color: MUTED_3,
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            ‹ Ledgers
+          </button>
+        )}
         <div style={{ font: `600 10px ${ARCHIVO}`, letterSpacing: ".16em", textTransform: "uppercase", color: MUTED_3 }}>
           You and {F}
         </div>

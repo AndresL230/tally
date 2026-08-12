@@ -26,9 +26,9 @@
   ],
   "vars": {
     // Cloudflare Access team domain, e.g. "myteam.cloudflareaccess.com"
-    "ACCESS_TEAM_DOMAIN": "REPLACE-ME.cloudflareaccess.com",
+    "ACCESS_TEAM_DOMAIN": "web-1rs-pages.cloudflareaccess.com",
     // The Access application AUD tag (Zero Trust → Access → Applications → your app → Overview)
-    "ACCESS_AUD": "REPLACE-ME",
+    "ACCESS_AUD": "d640f5add8f1f14518269321fe5796237722992a7ba1192c5ce0311f72d36775",
     // Cloudflare account id + AI Gateway id for Anthropic extraction calls (M2)
     "AI_GATEWAY_ACCOUNT_ID": "0bda3a2560ca48711ef7336cc421abed",
     "AI_GATEWAY_ID": "tally"

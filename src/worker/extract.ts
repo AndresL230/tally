@@ -9,7 +9,7 @@
 import type { Env } from "./env";
 import { isValidDate } from "./validate";
 
-export const EXTRACT_MODEL = "claude-sonnet-5";
+export const EXTRACT_MODEL = "claude-haiku-4-5";
 
 const RECEIPT_TOOL = {
   name: "record_receipt",

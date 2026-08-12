@@ -14,9 +14,7 @@
     {
       "binding": "DB",
       "database_name": "tally",
-      // Placeholder — replace with the real id after `wrangler d1 create tally`
-      // (see HUMAN_TODO.md). Local dev and tests ignore this value.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "b89462c1-af9b-46a1-bb05-0579b793ab25",
       "migrations_dir": "migrations"
     }
   ],

@@ -42,7 +42,7 @@ export function registerPrefs(app: Hono<AppContext>): void {
   });
 
   // New ledger = the friend's email. The other half of adding a friend is
-  // the Access policy (documented in README/HUMAN_TODO) — this route only
+  // the Access policy (documented in README) — this route only
   // creates the pair.
   app.post("/api/ledgers", async (c) => {
     const email = c.get("email");

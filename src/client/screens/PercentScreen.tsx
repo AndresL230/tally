@@ -39,7 +39,7 @@ export function PercentScreen({
   const [pct, setPct] = useState(50);
   // The mockup's percent screen has no payer toggle; without one a no-items
   // receipt the FRIEND paid would be unrecordable. The payer segment of the
-  // meta line is tappable instead (logged in REVIEW-M2).
+  // meta line is tappable instead (logged in the M2 review, in git history).
   const [payerIsViewer, setPayerIsViewer] = useState(payer === viewerEmail);
 
   const friendCents = percentShare(totalCents, pct);

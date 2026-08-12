@@ -65,8 +65,7 @@ verification path (signature, issuer, audience, expiry).
 ## Cloudflare Access setup (auth)
 
 Access hosts the login screen itself — the app has no sign-in UI and boots
-assuming an authenticated request. Full click-by-click steps live in
-[HUMAN_TODO.md](./HUMAN_TODO.md); the shape:
+assuming an authenticated request. The shape:
 
 1. **Create an Access application** (Zero Trust → Access → Applications →
    Add → Self-hosted) for the app's hostname.
@@ -115,4 +114,4 @@ mockup/       The design mockup (reference only; not built)
 ```
 
 See `DEVIATIONS.md` for every place the implementation deliberately departs
-from the spec or mockup, and `HUMAN_TODO.md` for the manual Cloudflare steps.
+from the spec or mockup.

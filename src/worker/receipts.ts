@@ -201,7 +201,7 @@ export function registerReceipts(app: Hono<AppContext>): void {
       return c.json({ error: `receipt is ${receipt.status}` }, 409);
     }
     if (!c.env.ANTHROPIC_API_KEY) {
-      // The live path is gated on the secret (HUMAN_TODO step 6). Status
+      // The live path is gated on the secret (see README: AI Gateway setup). Status
       // stays as-is so extraction can run once the key exists.
       return c.json({ error: "extraction not configured" }, 503);
     }

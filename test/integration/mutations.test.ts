@@ -418,7 +418,7 @@ describe("idempotency: repeat POST with the same id is a no-op", () => {
   });
 
   it("expense: same id posted to a DIFFERENT ledger => 409 without leaking the original; the second ledger stays empty", async () => {
-    // Contract amendment (recorded in REVIEW-M1.md): a cross-ledger id
+    // Contract amendment (recorded in the M1 review, in git history): a cross-ledger id
     // collision is not a "repeat" — echoing the original row from another
     // ledger's endpoint would leak data when the caller isn't a member of
     // the original's ledger. The API answers 409 and writes nothing.

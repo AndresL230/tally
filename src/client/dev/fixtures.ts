@@ -153,9 +153,13 @@ function reversalOf(id: string, occurredOn: string, original: Proto): Proto {
     occurred_on: occurredOn,
     created_at: ++createdAt,
     delta_cents: -original.delta_cents,
+    // Mirrors the mutations.ts reversal insert exactly: note 'Void',
+    // NEGATED other_share, no receipt link, voider as created_by.
     expense: {
       ...ex,
-      note: null,
+      note: "Void",
+      other_share_cents: -ex.other_share_cents,
+      receipt_id: null,
       extra_cents: null,
       items: null,
       reverses_id: original.id,

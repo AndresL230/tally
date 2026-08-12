@@ -68,22 +68,38 @@ export class ApiError extends Error {
   }
 }
 
+/** Reload so Cloudflare Access can host its login again — but never in a
+ *  loop: at most once per 15s, else surface the error instead. */
+function reloadForLogin(): never {
+  const KEY = "tally:last-auth-reload";
+  const last = Number(sessionStorage.getItem(KEY) ?? 0);
+  if (Date.now() - last > 15_000) {
+    sessionStorage.setItem(KEY, String(Date.now()));
+    window.location.reload();
+  }
+  throw new ApiError(401, "session expired");
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // redirect: "manual" — no legitimate /api route ever redirects, so ANY
+  // redirect is Cloudflare Access bouncing an expired session to its
+  // (cross-origin) login page. Following it would make the browser kill
+  // the response as a CORS failure before we could observe anything;
+  // manual mode surfaces it deterministically as an opaqueredirect.
   const res = await fetch(path, {
     ...init,
+    redirect: "manual",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
-  // Expired Cloudflare Access session: API fetches get redirected to the
-  // hosted login (an HTML page). In standalone/PWA mode nothing else would
-  // ever re-trigger login, so reload the document and let Access take over.
   const contentType = res.headers.get("content-type") ?? "";
   if (
-    (res.redirected && new URL(res.url).hostname.endsWith("cloudflareaccess.com")) ||
+    res.type === "opaqueredirect" ||
     (res.ok && !contentType.includes("application/json"))
   ) {
-    window.location.reload();
-    // Unreachable in practice; keeps the promise from resolving with junk.
-    throw new ApiError(401, "session expired");
+    // Expired Access session (or an HTML interloper): reload the document
+    // and let Access host login — vital in standalone/PWA mode where
+    // nothing else would ever re-trigger it.
+    reloadForLogin();
   }
   if (!res.ok) {
     let message = res.statusText;

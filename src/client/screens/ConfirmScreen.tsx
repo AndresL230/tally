@@ -562,6 +562,7 @@ export function ConfirmScreen({
         )}
         <button
           onClick={commit}
+          data-testid="confirm-commit"
           disabled={!valid || busy}
           style={{
             width: "100%",

@@ -64,7 +64,7 @@ function AutoArm({ children }: { children: ReactNode }) {
     const t = window.setTimeout(() => {
       const buttons = ref.current?.querySelectorAll("button") ?? [];
       for (const b of buttons) {
-        if (b.textContent === "Add to ledger") {
+        if (b.getAttribute("data-testid") === "confirm-commit") {
           b.click();
           break;
         }

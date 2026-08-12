@@ -25,7 +25,7 @@ def png(width, height, rgb_rows):
 def render(size, pad_frac):
     """Four vertical bars + a rotated slash, mockup geometry (76x48 box)."""
     img = [[PAPER for _ in range(size)] for _ in range(size)]
-    # design box: bars at x = 0,13,26,39 (w 4, h 44) in a 43x44 glyph, centered
+    # glyph box 43x48: bars at x = 0,13,26,39 (w 4, h 44), slash overshoots below
     pad = size * pad_frac
     glyph_w, glyph_h = 43.0, 48.0
     scale = (size - 2 * pad) / max(glyph_w, glyph_h)
@@ -40,7 +40,7 @@ def render(size, pad_frac):
     for bar_x in (0, 13, 26, 39):
         fill(ox + bar_x * scale, oy, ox + (bar_x + 4) * scale, oy + 44 * scale, INK)
 
-    # slash: from (-4, 20) rotated -24deg, length 58, thickness 4 (mockup)
+    # slash: from (-4, 22) rotated -24deg, length 58, thickness 4 (mockup geometry)
     import math
 
     ang = math.radians(-24)
@@ -58,7 +58,7 @@ def render(size, pad_frac):
     return png(size, size, rows)
 
 
-for size, pad, name in [(192, 0.18, "icon-192.png"), (512, 0.18, "icon-512.png"), (512, 0.28, "icon-512-maskable.png")]:
+for size, pad, name in [(192, 0.18, "icon-192.png"), (512, 0.18, "icon-512.png"), (512, 0.22, "icon-512-maskable.png")]:
     with open(sys.argv[1] + "/" + name, "wb") as f:
         f.write(render(size, pad))
 print("icons written")

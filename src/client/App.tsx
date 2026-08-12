@@ -215,14 +215,31 @@ export default function App() {
       let { receipt, items } = up;
       setFlow({ receipt, items });
       if (receipt.status !== "needs_review" && receipt.status !== "failed") {
-        // Fresh upload (or a dedupe onto a not-yet-extracted/discarded
-        // receipt): run the extraction round-trip. A cache hit server-side
-        // returns the stored result without a model call.
+        // Fresh upload (or a dedupe onto a not-yet-extracted receipt): run
+        // the extraction round-trip. A cache hit server-side returns the
+        // stored result without a model call. If the OTHER member is mid-
+        // extraction on the same bytes (status 'extracting', server-side
+        // claim), poll until their result lands.
         const extracted = await api.extractReceipt(receipt.id);
         if (!live()) return;
         receipt = extracted.receipt;
         items = extracted.items;
         setFlow({ receipt, items });
+        for (let tries = 0; receipt.status === "extracting" && tries < 20; tries++) {
+          await new Promise((resolve) => window.setTimeout(resolve, 1200));
+          if (!live()) return;
+          const polled = await api.extractReceipt(receipt.id);
+          if (!live()) return;
+          receipt = polled.receipt;
+          items = polled.items;
+          setFlow({ receipt, items });
+        }
+        if (receipt.status === "extracting") {
+          // Their call is stuck; fall to manual rather than spin forever.
+          stopScanTimer();
+          setScreen({ name: "manual", reason: "photofail" });
+          return;
+        }
       }
 
       if (receipt.status === "failed") {
@@ -291,8 +308,11 @@ export default function App() {
         method: "manual",
         other_share_cents: payload.other_share_cents,
         note: "Entered by hand.",
-        // A photo-failed manual entry keeps the receipt link when one exists.
-        ...(flow ? { receipt_id: flow.receipt.id } : {}),
+        // A photo-failed manual entry keeps the receipt link when one
+        // exists and is still linkable (a posted/discarded id would 409).
+        ...(flow && flow.receipt.status !== "posted" && flow.receipt.status !== "discarded"
+          ? { receipt_id: flow.receipt.id }
+          : {}),
       });
       clearIntent();
       setFlow(null);
@@ -332,7 +352,7 @@ export default function App() {
 
   /** Percent fallback for a receipt whose total came through without line
    *  items. otherShareCents is the NON-PAYER's share from the slider. */
-  const commitPercent = async (otherShareCents: number) => {
+  const commitPercent = async (commit: { payer: string; other_share_cents: number }) => {
     if (busy || !flow) return;
     const r = flow.receipt;
     setBusy(true);
@@ -342,9 +362,9 @@ export default function App() {
         occurred_on: r.purchased_on ?? todayISO(),
         merchant: r.merchant ?? "Receipt",
         total_cents: r.total_cents ?? 0,
-        payer: detail.viewer,
+        payer: commit.payer,
         method: "percent",
-        other_share_cents: otherShareCents,
+        other_share_cents: commit.other_share_cents,
         note: "Halved by percentage — no line items on the photo.",
         receipt_id: r.id,
       });
@@ -491,6 +511,7 @@ export default function App() {
           totalCents={flow.receipt.total_cents}
           payer={detail.viewer}
           viewerEmail={detail.viewer}
+          friendEmail={friendEmail}
           onCancel={cancelAndDiscard}
           onCommit={commitPercent}
         />

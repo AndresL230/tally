@@ -388,18 +388,56 @@ describe("POST /api/ledgers/:id/receipts — upload", () => {
     expect(row!.sha256).toBe(originalSha); // original bytes still win
   });
 
-  it("dedupe holds onto a DISCARDED receipt: re-upload returns it (200) with its discarded status", async () => {
+  it("re-uploading a DISCARDED receipt's bytes RESURRECTS it (DEVIATIONS D8): same row, status back in play", async () => {
+    // Amended after the M2 review: leaving the receipt discarded made the
+    // photo a permanent dead end (every later commit 409s). Re-uploading
+    // the same bytes is a clear signal the user wants it back.
     const bytes = fakeImage("discard-then-reupload");
     const firstId = crypto.randomUUID();
     expect((await uploadReceipt(ledgerId, ALEX, bytes, { id: firstId })).status).toBe(201);
     expect((await discard(firstId, ALEX)).status).toBe(200);
 
+    // No extraction ran (raw_json NULL) -> resurrects to 'uploaded'.
     const res = await uploadReceipt(ledgerId, JORDAN, bytes, { id: crypto.randomUUID() });
     expect(res.status).toBe(200);
     const json = (await res.json()) as ReceiptResponse;
     expect(json.receipt.id).toBe(firstId);
-    expect(json.receipt.status).toBe("discarded");
+    expect(json.receipt.status).toBe("uploaded");
     expect(await countReceipts()).toBe(1);
+  });
+
+  it("resurrecting a discarded receipt that WAS extracted returns to needs_review with its items intact", async () => {
+    const bytes = fakeImage("discard-after-extract");
+    const rid = crypto.randomUUID();
+    expect((await uploadReceipt(ledgerId, ALEX, bytes, { id: rid })).status).toBe(201);
+    interceptGateway(cleanFixture);
+    expect((await extract(rid, ALEX)).status).toBe(200);
+    expect((await discard(rid, ALEX)).status).toBe(200);
+
+    const res = await uploadReceipt(ledgerId, ALEX, bytes, { id: crypto.randomUUID() });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as ReceiptResponse;
+    expect(json.receipt.id).toBe(rid);
+    expect(json.receipt.status).toBe("needs_review");
+    expect(json.items).toHaveLength(6); // extracted items survived the round trip
+    expect(await countReceipts()).toBe(1);
+  });
+
+  it("extract claim: a receipt mid-extraction is NOT re-extracted — current state returned, no second model call", async () => {
+    // Two members scanning the same paper receipt seconds apart: the
+    // second extract call must not reach the gateway while the first holds
+    // the claim (status 'extracting', raw_json still NULL).
+    const rid = (await freshReceipt(ledgerId, ALEX)).id;
+    await forceStatus(rid, "extracting");
+
+    // No interceptor armed: a gateway call here would throw and 500.
+    const res = await extract(rid, JORDAN);
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as ReceiptResponse;
+    expect(json.receipt.status).toBe("extracting");
+
+    const row = await receiptRow(rid);
+    expect(row!.raw_json).toBeNull(); // untouched; the claim holder will write it
   });
 
   it("dedupe is PER LEDGER: same bytes in a different ledger create a separate receipt", async () => {

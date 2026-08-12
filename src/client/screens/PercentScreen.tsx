@@ -15,12 +15,13 @@ export interface PercentScreenProps {
   /** Canonical 'YYYY-MM-DD'. */
   occurredOn: string;
   totalCents: number;
-  /** Email of whoever paid. */
+  /** Email of whoever paid, initially (tappable to switch). */
   payer: string;
   viewerEmail: string;
+  friendEmail: string;
   onCancel: () => void;
-  /** The NON-PAYER's share in cents, per the contract's pct semantics. */
-  onCommit: (otherShareCents: number) => void;
+  /** payer + the NON-PAYER's share in cents, per the contract's pct semantics. */
+  onCommit: (commit: { payer: string; other_share_cents: number }) => void;
 }
 
 export function PercentScreen({
@@ -31,11 +32,15 @@ export function PercentScreen({
   totalCents,
   payer,
   viewerEmail,
+  friendEmail,
   onCancel,
   onCommit,
 }: PercentScreenProps) {
   const [pct, setPct] = useState(50);
-  const payerIsViewer = payer === viewerEmail;
+  // The mockup's percent screen has no payer toggle; without one a no-items
+  // receipt the FRIEND paid would be unrecordable. The payer segment of the
+  // meta line is tappable instead (logged in REVIEW-M2).
+  const [payerIsViewer, setPayerIsViewer] = useState(payer === viewerEmail);
 
   const friendCents = percentShare(totalCents, pct);
   const meCents = totalCents - friendCents;
@@ -58,7 +63,22 @@ export function PercentScreen({
         </div>
         <div style={{ marginTop: 18, fontFamily: SERIF, fontSize: 32, lineHeight: 1.1 }}>{merchant}</div>
         <div style={{ marginTop: 6, font: `500 14px ${MONO}`, color: MUTED_3 }}>
-          {longDate(occurredOn)} · {moneyAbs(totalCents)} · {payerIsViewer ? "you paid" : `${F} paid`}
+          {longDate(occurredOn)} · {moneyAbs(totalCents)} ·{" "}
+          <button
+            onClick={() => setPayerIsViewer((v) => !v)}
+            style={{
+              border: 0,
+              background: "transparent",
+              padding: 0,
+              font: `600 14px ${MONO}`,
+              color: C.deep,
+              cursor: "pointer",
+              borderBottom: "1px dotted rgba(0,0,0,.35)",
+            }}
+            title="Tap to switch who paid"
+          >
+            {payerIsViewer ? "you paid" : `${F} paid`}
+          </button>
         </div>
 
         <div
@@ -83,7 +103,7 @@ export function PercentScreen({
           {moneyAbs(totalCents)}
         </div>
         <button
-          onClick={() => onCommit(owedCents)}
+          onClick={() => onCommit({ payer: payerIsViewer ? viewerEmail : friendEmail, other_share_cents: owedCents })}
           style={{
             width: "100%",
             height: 58,

@@ -57,3 +57,28 @@ echoing the original row from another ledger's endpoint would leak data to
 a caller who may not be a member there. All three mutation routes answer
 409 { error } with nothing written and nothing echoed. (Found at first
 contact between the contract-written tests and the implementation.)
+
+## D8. Re-uploading a discarded receipt's bytes resurrects it
+
+The M2 contract's first draft said dedupe returns a discarded receipt
+as-is, which made a cancelled photo a permanent dead end: the same bytes
+always deduped onto a receipt every commit would 409. Now an upload that
+dedupes onto a discarded receipt flips it back to 'needs_review' (if it
+was extracted; items survive) or 'uploaded' (if not). Re-picking the same
+photo is an unambiguous signal the user wants it back. Found by the M2
+review.
+
+## D9. Extraction and posting are claim-based, not check-then-act
+
+Two members can scan the same paper receipt seconds apart (dedupe lands
+them on one row). Two guarantees are enforced with conditional writes
+rather than pre-checks: (a) extract claims the job with
+UPDATE ... SET status='extracting' WHERE status IN ('uploaded','failed')
+AND raw_json IS NULL — losers get the current state back and the client
+polls, so one image is never sent to the model twice in one ledger; (b)
+the items-expense batch gates its insert on the receipt still being
+available inside the transaction, so two concurrent confirms produce
+exactly one expense (the loser gets a 409). Residual known gap: a worker
+that dies mid-extraction leaves 'extracting' until the client's poll
+gives up and offers manual entry; there is no timed reclaim (no
+updated_at column). Judged acceptable for a two-person app.

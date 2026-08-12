@@ -114,6 +114,9 @@ export function salvageExtraction(input: unknown): ExtractionFields {
   }
 
   let items: ExtractedItem[] = [];
+  // >100 items is treated like any other garbled read: the whole list is
+  // dropped (the expense route caps at 100 anyway; a receipt that long is
+  // far more likely a mis-read than a real purchase).
   if (Array.isArray(o.items) && o.items.length <= 100) {
     const salvaged: ExtractedItem[] = [];
     let allValid = true;

@@ -126,6 +126,9 @@ export function registerMutations(app: Hono<AppContext>): void {
     }
 
     if (receiptId) {
+      // Friendly pre-check for the common single-caller case; the batch
+      // below re-enforces every condition transactionally, so a racing
+      // second commit cannot double-post a receipt.
       const receipt = await c.env.DB.prepare(
         "SELECT status FROM receipts WHERE id = ?1 AND ledger_id = ?2",
       )
@@ -140,61 +143,88 @@ export function registerMutations(app: Hono<AppContext>): void {
       }
     }
 
-    const statements = [
-      c.env.DB.prepare(
-        `INSERT INTO expenses (id, ledger_id, occurred_on, merchant, total_cents, payer,
-           other_share_cents, method, note, receipt_id, extra_cents, created_by, created_at, reverses_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL)
-         ON CONFLICT(id) DO NOTHING`,
-      ).bind(
-        id,
-        ledger.id,
-        occurredOn,
-        merchant,
-        totalCents,
-        payer,
-        otherShare,
-        method,
-        note,
-        receiptId,
-        extraCents,
-        email,
-        Date.now(),
-      ),
-    ];
+    // D1 batches run as one transaction. For receipt-linked expenses the
+    // insert is gated on the receipt still being available INSIDE that
+    // transaction, and every follow-up statement is gated on our insert
+    // having landed — so of two concurrent commits for one receipt, exactly
+    // one writes; the loser falls through to the conflict handling below.
+    const now = Date.now();
+    const expenseInsert = receiptId
+      ? c.env.DB.prepare(
+          `INSERT INTO expenses (id, ledger_id, occurred_on, merchant, total_cents, payer,
+             other_share_cents, method, note, receipt_id, extra_cents, created_by, created_at, reverses_id)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL
+           WHERE EXISTS (
+             SELECT 1 FROM receipts r
+             WHERE r.id = ?10 AND r.ledger_id = ?2 AND r.status NOT IN ('posted','discarded')
+           )
+           AND NOT EXISTS (SELECT 1 FROM expenses e WHERE e.id = ?1)`,
+        ).bind(
+          id, ledger.id, occurredOn, merchant, totalCents, payer,
+          otherShare, method, note, receiptId, extraCents, email, now,
+        )
+      : c.env.DB.prepare(
+          `INSERT INTO expenses (id, ledger_id, occurred_on, merchant, total_cents, payer,
+             other_share_cents, method, note, receipt_id, extra_cents, created_by, created_at, reverses_id)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12, NULL)
+           ON CONFLICT(id) DO NOTHING`,
+        ).bind(
+          id, ledger.id, occurredOn, merchant, totalCents, payer,
+          otherShare, method, note, extraCents, email, now,
+        );
+
+    const OURS = "SELECT 1 FROM expenses e WHERE e.id = ?1 AND e.receipt_id = ?2";
+    const statements = [expenseInsert];
     if (receiptId && itemRows) {
       // Confirmed values win: replace the extracted items with the posted
       // set and stamp the receipt with what the human approved.
       statements.push(
-        c.env.DB.prepare("DELETE FROM receipt_items WHERE receipt_id = ?1").bind(receiptId),
+        c.env.DB.prepare(
+          `DELETE FROM receipt_items WHERE receipt_id = ?2 AND EXISTS (${OURS})`,
+        ).bind(id, receiptId),
         ...itemRows.map((it) =>
           c.env.DB.prepare(
             `INSERT INTO receipt_items (id, receipt_id, label, qty, price_cents, assigned_to)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
-          ).bind(crypto.randomUUID(), receiptId, it.label, it.qty, it.price_cents, it.assigned_to),
+             SELECT ?3, ?2, ?4, ?5, ?6, ?7 WHERE EXISTS (${OURS})`,
+          ).bind(id, receiptId, crypto.randomUUID(), it.label, it.qty, it.price_cents, it.assigned_to),
         ),
         c.env.DB.prepare(
-          "UPDATE receipts SET status = 'posted', merchant = ?2, purchased_on = ?3, total_cents = ?4 WHERE id = ?1",
-        ).bind(receiptId, merchant, occurredOn, totalCents),
+          `UPDATE receipts SET status = 'posted', merchant = ?3, purchased_on = ?4, total_cents = ?5
+           WHERE id = ?2 AND EXISTS (${OURS})`,
+        ).bind(id, receiptId, merchant, occurredOn, totalCents),
       );
     } else if (receiptId) {
       statements.push(
-        c.env.DB.prepare("UPDATE receipts SET status = 'posted' WHERE id = ?1").bind(receiptId),
+        c.env.DB.prepare(
+          `UPDATE receipts SET status = 'posted' WHERE id = ?2 AND EXISTS (${OURS})`,
+        ).bind(id, receiptId),
       );
     }
 
     const results = await c.env.DB.batch(statements);
     if (results[0]!.meta.changes === 0) {
-      // Lost a race with an identical retry; converged state either way.
+      // Our insert didn't land: an identical retry beat us, the id is taken
+      // elsewhere, or the receipt got posted/discarded mid-flight.
       const existing = await c.env.DB.prepare(
         "SELECT ledger_id FROM expenses WHERE id = ?1",
       )
         .bind(id)
         .first<{ ledger_id: string }>();
-      if (existing?.ledger_id !== ledger.id) {
+      if (existing?.ledger_id === ledger.id) {
+        return c.json({ entry: await entryResponse(c.env.DB, ledger, email, id) }, 200);
+      }
+      if (existing) {
         return c.json({ error: "id already used" }, 409);
       }
-      return c.json({ entry: await entryResponse(c.env.DB, ledger, email, id) }, 200);
+      const receiptNow = receiptId
+        ? await c.env.DB.prepare("SELECT status FROM receipts WHERE id = ?1")
+            .bind(receiptId)
+            .first<{ status: string }>()
+        : null;
+      return c.json(
+        { error: `receipt is ${receiptNow?.status ?? "unavailable"}` },
+        409,
+      );
     }
     return c.json({ entry: await entryResponse(c.env.DB, ledger, email, id) }, 201);
   });

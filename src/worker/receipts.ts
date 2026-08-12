@@ -54,7 +54,9 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Receipt + membership, or null (route answers 404 — no existence oracle). */
+/** Receipt + membership, or null (route answers 404 — no existence oracle:
+ *  missing and foreign receipts return byte-identical responses; the receipt
+ *  lookup happening first leaks nothing observable in the body). */
 async function receiptForMember(
   env: Env,
   receiptId: string,
@@ -116,6 +118,19 @@ export function registerReceipts(app: Hono<AppContext>): void {
       .bind(ledger.id, sha)
       .first<ReceiptRow>();
     if (existing) {
+      // Re-uploading the bytes of a DISCARDED receipt is a clear signal the
+      // user wants it back: resurrect instead of dead-ending every later
+      // commit on a 409 (DEVIATIONS D8). Extracted state survives.
+      if (existing.status === "discarded") {
+        await c.env.DB.prepare("UPDATE receipts SET status = ?2 WHERE id = ?1")
+          .bind(existing.id, existing.raw_json !== null ? "needs_review" : "uploaded")
+          .run();
+        const revived = await receiptById(c.env.DB, existing.id);
+        return c.json(
+          { receipt: toApi(revived!), items: await itemsOf(c.env.DB, existing.id) },
+          200,
+        );
+      }
       return c.json(
         { receipt: toApi(existing), items: await itemsOf(c.env.DB, existing.id) },
         200,
@@ -126,10 +141,11 @@ export function registerReceipts(app: Hono<AppContext>): void {
     const byId = await receiptById(c.env.DB, id);
     if (byId) return c.json({ error: "id already used" }, 409);
 
+    // Row first, THEN the object: if two uploads race, the D1 primary key /
+    // sha unique decides the winner before any bytes land in R2, so the
+    // stored object can never disagree with the row's sha256 and a losing
+    // dedupe race leaves no orphan object.
     const r2Key = `receipts/${ledger.id}/${id}.jpg`;
-    await c.env.RECEIPTS.put(r2Key, bytes, {
-      httpMetadata: { contentType },
-    });
     try {
       await c.env.DB.prepare(
         `INSERT INTO receipts (id, ledger_id, r2_key, sha256, status, uploaded_by, created_at)
@@ -150,6 +166,17 @@ export function registerReceipts(app: Hono<AppContext>): void {
           200,
         );
       }
+      throw err;
+    }
+
+    try {
+      await c.env.RECEIPTS.put(r2Key, bytes, {
+        httpMetadata: { contentType },
+      });
+    } catch (err) {
+      // Compensate: a row without an object would only fail later at
+      // extract time; better to fail loudly now and leave nothing behind.
+      await c.env.DB.prepare("DELETE FROM receipts WHERE id = ?1").bind(id).run();
       throw err;
     }
 
@@ -182,39 +209,51 @@ export function registerReceipts(app: Hono<AppContext>): void {
       return c.json({ error: "receipt has no stored image" }, 500);
     }
 
-    await c.env.DB.prepare("UPDATE receipts SET status = 'extracting' WHERE id = ?1")
+    // Claim the job with a conditional write so two members scanning the
+    // same paper receipt can't trigger two model calls: only one caller
+    // flips the status to 'extracting'; everyone else gets the current
+    // state back and polls (the cache branch above serves them once the
+    // winner persists). One model call per image, enforced, not assumed.
+    const claim = await c.env.DB.prepare(
+      `UPDATE receipts SET status = 'extracting'
+       WHERE id = ?1 AND status IN ('uploaded', 'failed') AND raw_json IS NULL`,
+    )
       .bind(receipt.id)
       .run();
-
-    const object = await c.env.RECEIPTS.get(receipt.r2_key);
-    if (!object) {
-      await c.env.DB.prepare("UPDATE receipts SET status = 'failed' WHERE id = ?1")
-        .bind(receipt.id)
-        .run();
-      return c.json({ error: "stored image is missing" }, 500);
+    if (claim.meta.changes === 0) {
+      const current = await receiptById(c.env.DB, receipt.id);
+      return c.json(
+        { receipt: toApi(current!), items: await itemsOf(c.env.DB, receipt.id) },
+        200,
+      );
     }
 
-    let raw: string;
-    let fields: ExtractionFields;
     try {
-      const result = await runExtraction(
+      const object = await c.env.RECEIPTS.get(receipt.r2_key);
+      if (!object) {
+        await c.env.DB.prepare("UPDATE receipts SET status = 'failed' WHERE id = ?1")
+          .bind(receipt.id)
+          .run();
+        return c.json({ error: "stored image is missing" }, 500);
+      }
+      const { raw, fields } = await runExtraction(
         c.env,
         await object.arrayBuffer(),
         object.httpMetadata?.contentType ?? "image/jpeg",
       );
-      raw = result.raw;
-      fields = result.fields;
+      await persistExtraction(c.env, receipt, raw, fields);
     } catch (err) {
-      if (err instanceof GatewayError) {
-        await c.env.DB.prepare("UPDATE receipts SET status = 'failed' WHERE id = ?1")
-          .bind(receipt.id)
-          .run();
-        return c.json({ error: err.message }, 500);
-      }
-      throw err;
+      // ANY failure after the claim releases it as 'failed' (raw_json still
+      // NULL, so a retry can re-claim); the receipt never sticks at
+      // 'extracting' because of a thrown error.
+      await c.env.DB.prepare("UPDATE receipts SET status = 'failed' WHERE id = ?1")
+        .bind(receipt.id)
+        .run();
+      const message = err instanceof GatewayError ? err.message : "extraction failed";
+      if (!(err instanceof GatewayError)) console.error(err);
+      return c.json({ error: message }, 500);
     }
 
-    await persistExtraction(c.env, receipt, raw, fields);
     const fresh = await receiptById(c.env.DB, receipt.id);
     return c.json(
       { receipt: toApi(fresh!), items: await itemsOf(c.env.DB, receipt.id) },

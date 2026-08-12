@@ -1,0 +1,33 @@
+{
+  "id": "msg_01FixtureGarbageDate0001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01GarbageDate0001",
+      "name": "record_receipt",
+      "input": {
+        "looks_like_receipt": true,
+        "merchant": "Blue Star Donuts",
+        "purchased_on": "AUG 32ND!!",
+        "total_cents": 1850,
+        "items": [
+          { "label": "Old fashioned", "qty": "x2", "price_cents": 700 },
+          { "label": "Blueberry bourbon basil", "price_cents": 425 },
+          { "label": "Drip coffee", "price_cents": 375 },
+          { "label": "Cold brew", "price_cents": 350 }
+        ]
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 1489,
+    "output_tokens": 176,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  }
+}

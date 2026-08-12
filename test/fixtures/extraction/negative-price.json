@@ -1,0 +1,32 @@
+{
+  "id": "msg_01FixtureNegativePrice01",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01NegativePrice01",
+      "name": "record_receipt",
+      "input": {
+        "looks_like_receipt": true,
+        "merchant": "Corner Deli",
+        "purchased_on": "2026-08-05",
+        "total_cents": 2100,
+        "items": [
+          { "label": "Turkey sandwich", "price_cents": 899 },
+          { "label": "Coupon discount", "price_cents": -450 },
+          { "label": "Seltzer", "qty": "x2", "price_cents": 250 }
+        ]
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 1477,
+    "output_tokens": 149,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  }
+}

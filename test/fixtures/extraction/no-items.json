@@ -1,0 +1,28 @@
+{
+  "id": "msg_01FixtureNoItems00000001",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_01NoItems0001",
+      "name": "record_receipt",
+      "input": {
+        "looks_like_receipt": true,
+        "merchant": "Trader Joe's",
+        "purchased_on": "2026-08-02",
+        "total_cents": 4327,
+        "items": []
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 1390,
+    "output_tokens": 74,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  }
+}

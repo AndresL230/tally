@@ -9,7 +9,9 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    // `npm run dev:client` proxies /api to `npm run dev` (wrangler dev)
-    proxy: { "/api": "http://127.0.0.1:8787" },
+    // `npm run dev:client` proxies /api/* to `npm run dev` (wrangler dev).
+    // Trailing slash matters: a bare "/api" prefix would also swallow the
+    // client's own /api.ts module request in dev.
+    proxy: { "/api/": "http://127.0.0.1:8787" },
   },
 });

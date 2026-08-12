@@ -33,6 +33,12 @@ export default defineConfig(async () => {
             // localhost-host requests; regular tests use https://tally.test,
             // so both guard branches are covered deliberately in auth tests.
             DEV_ALLOW_USER: "devuser@example.com",
+            // Extraction tests mock the gateway with fetchMock; these two
+            // route the URL. ANTHROPIC_API_KEY is deliberately NOT bound —
+            // tests set it via env mutation so the key-absent 503 path is
+            // the default, as on a fresh deployment.
+            AI_GATEWAY_ACCOUNT_ID: "test-account",
+            AI_GATEWAY_ID: "test-gw",
           },
         },
       }),

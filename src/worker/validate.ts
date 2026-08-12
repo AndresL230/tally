@@ -22,6 +22,16 @@ export function assertDate(value: unknown, field: string): string {
   return value;
 }
 
+/** Boolean form of assertDate for salvage paths that blank instead of 400. */
+export function isValidDate(value: string): boolean {
+  try {
+    assertDate(value, "date");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function assertInt(
   value: unknown,
   field: string,

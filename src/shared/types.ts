@@ -22,6 +22,25 @@ export interface LedgerSummary {
   last_entry_on: string | null;
 }
 
+export type ReceiptStatus =
+  | "uploaded"
+  | "extracting"
+  | "needs_review"
+  | "posted"
+  | "failed"
+  | "discarded";
+
+export interface ApiReceipt {
+  id: string;
+  ledger_id: string;
+  status: ReceiptStatus;
+  merchant: string | null;
+  purchased_on: string | null;
+  total_cents: number | null;
+  uploaded_by: string | null;
+  created_at: number | null;
+}
+
 export interface ApiItem {
   id: string;
   label: string | null;

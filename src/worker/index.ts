@@ -3,6 +3,7 @@ import type { AppContext } from "./env";
 import { requireUser } from "./auth";
 import { ledgerDetail, ledgerForMember, listLedgers } from "./db";
 import { registerMutations } from "./mutations";
+import { registerReceipts } from "./receipts";
 
 const app = new Hono<AppContext>();
 
@@ -10,6 +11,7 @@ const app = new Hono<AppContext>();
 app.use("/api/*", requireUser);
 
 registerMutations(app);
+registerReceipts(app);
 
 app.get("/api/me", async (c) => {
   const email = c.get("email");

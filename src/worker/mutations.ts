@@ -2,6 +2,7 @@ import type { Hono } from "hono";
 import type { AppContext } from "./env";
 import type { ApiEntry } from "../shared/types";
 import { ledgerDetail, ledgerForMember, type LedgerRow } from "./db";
+import { splitItems } from "../shared/money";
 import {
   ValidationError,
   assertDate,
@@ -41,6 +42,23 @@ export function registerMutations(app: Hono<AppContext>): void {
 
     const body = await readJson(c.req.raw);
     const id = assertId(body.id, "id");
+
+    // Idempotent repeat first, before receipt-state checks: a successful
+    // items POST marks its receipt 'posted', which would otherwise 409 the
+    // very retry that idempotency exists for. Cross-ledger collision: 409
+    // with nothing echoed (DEVIATIONS D7).
+    const preExisting = await c.env.DB.prepare(
+      "SELECT ledger_id FROM expenses WHERE id = ?1",
+    )
+      .bind(id)
+      .first<{ ledger_id: string }>();
+    if (preExisting) {
+      if (preExisting.ledger_id !== ledger.id) {
+        return c.json({ error: "id already used" }, 409);
+      }
+      return c.json({ entry: await entryResponse(c.env.DB, ledger, email, id) }, 200);
+    }
+
     const occurredOn = assertDate(body.occurred_on, "occurred_on");
     const merchant = assertString(body.merchant, "merchant", { trim: true, max: 200 });
     const totalCents = assertInt(body.total_cents, "total_cents", { min: 0 });
@@ -48,29 +66,126 @@ export function registerMutations(app: Hono<AppContext>): void {
     if (payer !== ledger.person_a && payer !== ledger.person_b) {
       throw new ValidationError("payer must be a ledger member");
     }
+    const other = payer === ledger.person_a ? ledger.person_b : ledger.person_a;
     const method = body.method;
-    if (method !== "percent" && method !== "manual") {
-      // 'items' expenses are created through the receipt confirm flow (M2).
-      throw new ValidationError("method must be 'percent' or 'manual'");
+    if (method !== "items" && method !== "percent" && method !== "manual") {
+      throw new ValidationError("method must be 'items', 'percent' or 'manual'");
     }
-    const otherShare = assertInt(body.other_share_cents, "other_share_cents", {
-      min: 0,
-      max: totalCents,
-    });
     const note = optionalNote(body.note);
 
-    const result = await c.env.DB.prepare(
-      `INSERT INTO expenses (id, ledger_id, occurred_on, merchant, total_cents, payer,
-         other_share_cents, method, note, receipt_id, extra_cents, created_by, created_at, reverses_id)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, NULL, ?10, ?11, NULL)
-       ON CONFLICT(id) DO NOTHING`,
-    )
-      .bind(id, ledger.id, occurredOn, merchant, totalCents, payer, otherShare, method, note, email, Date.now())
-      .run();
+    let otherShare: number;
+    let extraCents: number | null = null;
+    let receiptId: string | null = null;
+    let itemRows: { label: string; qty: string | null; price_cents: number; assigned_to: string }[] | null =
+      null;
 
-    if (result.meta.changes === 0) {
-      // Idempotent repeat. Only echo the entry if it lives in this ledger —
-      // an id collision across ledgers must not leak the other row.
+    if (method === "items") {
+      receiptId = assertId(body.receipt_id, "receipt_id");
+      const rawItems = body.items;
+      if (!Array.isArray(rawItems) || rawItems.length < 1 || rawItems.length > 100) {
+        throw new ValidationError("items must be a list of 1 to 100 items");
+      }
+      itemRows = rawItems.map((raw, i) => {
+        if (typeof raw !== "object" || raw === null) {
+          throw new ValidationError(`items[${i}] must be an object`);
+        }
+        const it = raw as Record<string, unknown>;
+        const label = assertString(it.label, `items[${i}].label`, { trim: true, max: 200 });
+        const qty =
+          it.qty === undefined || it.qty === null
+            ? null
+            : assertString(it.qty, `items[${i}].qty`, { min: 0, max: 10 });
+        const price = assertInt(it.price_cents, `items[${i}].price_cents`, { min: 0 });
+        const assigned = it.assigned_to;
+        if (assigned !== ledger.person_a && assigned !== ledger.person_b && assigned !== "half") {
+          // Viewer-relative junk ("mine"/"theirs") is a client bug (rule D).
+          throw new ValidationError(
+            `items[${i}].assigned_to must be a member email or 'half'`,
+          );
+        }
+        return { label, qty, price_cents: price, assigned_to: assigned };
+      });
+      // The server is the authority on the split; any client-sent
+      // other_share_cents/extra_cents is ignored (penny rule 3).
+      const split = splitItems(
+        itemRows.map((it) => ({ price_cents: it.price_cents, assigned_to: it.assigned_to })),
+        payer,
+        other,
+        totalCents,
+      );
+      otherShare = split.other_share_cents;
+      extraCents = split.extra_cents;
+    } else {
+      otherShare = assertInt(body.other_share_cents, "other_share_cents", {
+        min: 0,
+        max: totalCents,
+      });
+      if (body.receipt_id !== undefined && body.receipt_id !== null) {
+        receiptId = assertId(body.receipt_id, "receipt_id");
+      }
+    }
+
+    if (receiptId) {
+      const receipt = await c.env.DB.prepare(
+        "SELECT status FROM receipts WHERE id = ?1 AND ledger_id = ?2",
+      )
+        .bind(receiptId, ledger.id)
+        .first<{ status: string }>();
+      if (!receipt) throw new ValidationError("receipt not found in this ledger");
+      if (receipt.status === "posted") {
+        return c.json({ error: "receipt is already posted" }, 409);
+      }
+      if (receipt.status === "discarded") {
+        return c.json({ error: "receipt is discarded" }, 409);
+      }
+    }
+
+    const statements = [
+      c.env.DB.prepare(
+        `INSERT INTO expenses (id, ledger_id, occurred_on, merchant, total_cents, payer,
+           other_share_cents, method, note, receipt_id, extra_cents, created_by, created_at, reverses_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL)
+         ON CONFLICT(id) DO NOTHING`,
+      ).bind(
+        id,
+        ledger.id,
+        occurredOn,
+        merchant,
+        totalCents,
+        payer,
+        otherShare,
+        method,
+        note,
+        receiptId,
+        extraCents,
+        email,
+        Date.now(),
+      ),
+    ];
+    if (receiptId && itemRows) {
+      // Confirmed values win: replace the extracted items with the posted
+      // set and stamp the receipt with what the human approved.
+      statements.push(
+        c.env.DB.prepare("DELETE FROM receipt_items WHERE receipt_id = ?1").bind(receiptId),
+        ...itemRows.map((it) =>
+          c.env.DB.prepare(
+            `INSERT INTO receipt_items (id, receipt_id, label, qty, price_cents, assigned_to)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+          ).bind(crypto.randomUUID(), receiptId, it.label, it.qty, it.price_cents, it.assigned_to),
+        ),
+        c.env.DB.prepare(
+          "UPDATE receipts SET status = 'posted', merchant = ?2, purchased_on = ?3, total_cents = ?4 WHERE id = ?1",
+        ).bind(receiptId, merchant, occurredOn, totalCents),
+      );
+    } else if (receiptId) {
+      statements.push(
+        c.env.DB.prepare("UPDATE receipts SET status = 'posted' WHERE id = ?1").bind(receiptId),
+      );
+    }
+
+    const results = await c.env.DB.batch(statements);
+    if (results[0]!.meta.changes === 0) {
+      // Lost a race with an identical retry; converged state either way.
       const existing = await c.env.DB.prepare(
         "SELECT ledger_id FROM expenses WHERE id = ?1",
       )

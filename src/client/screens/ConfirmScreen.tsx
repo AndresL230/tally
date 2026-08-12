@@ -155,6 +155,23 @@ export function ConfirmScreen({
     disarm();
   };
 
+  // The extra (tax and tip) line is editable too: typing an amount re-derives
+  // the total as items + extra, the inverse of editing the total. While the
+  // field isn't focused it renders the derived split.extra_cents, so item
+  // adds and total edits keep it honest.
+  const subtotalCents = items.reduce((a, i) => a + i.price_cents, 0);
+  const [extraFocused, setExtraFocused] = useState(false);
+  const [extraText, setExtraText] = useState("");
+  const commitExtra = () => {
+    setExtraFocused(false);
+    const cents = parseDollarsToCents(extraText);
+    if (cents === null) return; // unparseable: fall back to the derived value
+    const nextTotal = subtotalCents + cents;
+    setTotalCents(nextTotal);
+    setTotalText(moneyAbs(nextTotal));
+    disarm();
+  };
+
   const commit = () => {
     if (!valid || busy) return;
     if (needsBeat && !beat) {
@@ -492,11 +509,34 @@ export function ConfirmScreen({
 
           <div style={{ padding: "13px 14px", borderTop: "1px dashed rgba(0,0,0,.2)", display: "flex", flexDirection: "column", gap: 7 }}>
             <div style={{ display: "flex", alignItems: "baseline" }}>
-              <span style={{ font: `500 13.5px ${ARCHIVO}`, color: MUTED_1 }}>Extra (tax and tip)</span>
+              <label htmlFor="confirm-extra" style={{ font: `500 13.5px ${ARCHIVO}`, color: MUTED_1 }}>
+                Extra (tax and tip)
+              </label>
               <span style={{ flex: 1, borderBottom: "1px dotted rgba(0,0,0,.22)", margin: "0 8px", transform: "translateY(-3px)" }} />
-              <span style={{ font: `500 13.5px ${MONO}`, fontVariantNumeric: "tabular-nums" }}>
-                {money(split.extra_cents)}
-              </span>
+              <input
+                id="confirm-extra"
+                value={extraFocused ? extraText : money(split.extra_cents)}
+                inputMode="decimal"
+                onFocus={(e) => {
+                  setExtraFocused(true);
+                  setExtraText(money(split.extra_cents));
+                  e.target.select();
+                }}
+                onChange={(e) => setExtraText(e.target.value)}
+                onBlur={commitExtra}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                style={{
+                  width: 76,
+                  border: 0,
+                  borderBottom: "1px dashed rgba(0,0,0,.3)",
+                  paddingBottom: 2,
+                  font: `500 13.5px ${MONO}`,
+                  fontVariantNumeric: "tabular-nums",
+                  textAlign: "right",
+                }}
+              />
             </div>
             <div style={{ font: `400 12px ${MONO}`, color: MUTED_3, lineHeight: 1.5 }}>
               Divided in proportion to what each of you ate.

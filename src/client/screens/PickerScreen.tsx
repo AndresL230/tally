@@ -16,6 +16,8 @@ export interface PickerScreenProps {
   onOpen: (ledger: LedgerSummary) => void;
   /** Resolves on success (the app navigates away); throws ApiError on rejection. */
   onCreate: (email: string) => Promise<void>;
+  /** Reopen the prefs screen (name + color) in edit mode. */
+  onEditPrefs?: () => void;
 }
 
 function ledgerDisplayName(l: LedgerSummary): string {
@@ -37,6 +39,7 @@ export function PickerScreen({
   createOpenByDefault,
   onOpen,
   onCreate,
+  onEditPrefs,
 }: PickerScreenProps) {
   const [adding, setAdding] = useState(!!createOpenByDefault);
   const [email, setEmail] = useState("");
@@ -251,6 +254,23 @@ export function PickerScreen({
             >
               {error}
             </div>
+          )}
+
+          {onEditPrefs && (
+            <button
+              onClick={onEditPrefs}
+              style={{
+                marginTop: 22,
+                border: 0,
+                background: "transparent",
+                padding: 0,
+                font: `500 13px ${ARCHIVO}`,
+                color: MUTED_3,
+                cursor: "pointer",
+              }}
+            >
+              Edit your name and color ›
+            </button>
           )}
         </div>
       </div>

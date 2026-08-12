@@ -12,15 +12,10 @@ export const MUTED_4 = "#a8a298";
 export const MUTED_5 = "#b3aca1";
 export const MUTED_6 = "#c9c2b6";
 
-export const ACCENT_PALETTE = [
-  "#0a8a9b",
-  "#1b6ef3",
-  "#d4437a",
-  "#e4572e",
-  "#7c3aed",
-  "#0f8a5f",
-] as const;
-export const DEFAULT_ACCENT = ACCENT_PALETTE[0];
+// Single source of truth shared with server-side validation.
+export { ACCENT_PALETTE } from "../shared/prefs";
+import { ACCENT_PALETTE as PALETTE } from "../shared/prefs";
+export const DEFAULT_ACCENT = PALETTE[0];
 
 export const ARCHIVO = "Archivo, sans-serif";
 export const MONO = "'IBM Plex Mono', monospace";

@@ -37,6 +37,18 @@ describe("PUT /api/me (prefs)", () => {
     expect(updated).toMatchObject({ display_name: "Alexandra", accent_color: null });
   });
 
+  it("absent accent_color keeps the stored value; explicit null clears it", async () => {
+    await put("/api/me", ALEX, { display_name: "Alex", accent_color: ACCENT_PALETTE[1] });
+    // Name-only update: accent untouched.
+    await put("/api/me", ALEX, { display_name: "Al" });
+    let me = await authedJson<{ display_name: string; accent_color: string | null }>("/api/me", ALEX);
+    expect(me).toMatchObject({ display_name: "Al", accent_color: ACCENT_PALETTE[1] });
+    // Explicit null: cleared.
+    await put("/api/me", ALEX, { display_name: "Al", accent_color: null });
+    me = await authedJson<{ display_name: string; accent_color: string | null }>("/api/me", ALEX);
+    expect(me.accent_color).toBeNull();
+  });
+
   it("rejects off-palette colors, blank and oversized names", async () => {
     expect((await put("/api/me", ALEX, { display_name: "Alex", accent_color: "#ff0000" })).status).toBe(400);
     expect((await put("/api/me", ALEX, { display_name: "   " })).status).toBe(400);

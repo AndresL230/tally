@@ -9,6 +9,9 @@ export interface StartScreenProps {
   onPickAccent: (hex: string) => void;
   busy?: boolean;
   onSave: (prefs: { display_name: string; accent_color: string }) => void;
+  /** Edit mode (from the picker): prefill, softer copy, a cancel path. */
+  initialName?: string;
+  onCancel?: () => void;
 }
 
 const LABEL: CSSProperties = {
@@ -20,8 +23,9 @@ const LABEL: CSSProperties = {
   marginBottom: 7,
 };
 
-export function StartScreen({ colors: C, accent, onPickAccent, busy, onSave }: StartScreenProps) {
-  const [name, setName] = useState("");
+export function StartScreen({ colors: C, accent, onPickAccent, busy, onSave, initialName, onCancel }: StartScreenProps) {
+  const editing = initialName !== undefined;
+  const [name, setName] = useState(initialName ?? "");
   const ready = name.trim().length > 0 && !busy;
 
   const sampleBody = (bg: string, last = false): CSSProperties => ({
@@ -39,7 +43,17 @@ export function StartScreen({ colors: C, accent, onPickAccent, busy, onSave }: S
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "14px 24px 22px" }}>
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-        <div style={{ marginTop: 26, fontFamily: SERIF, fontSize: 44, lineHeight: 1.02 }}>Get started</div>
+        {onCancel && (
+          <button
+            onClick={onCancel}
+            style={{ border: 0, background: "transparent", padding: 0, font: `500 14px ${ARCHIVO}`, color: MUTED_3, cursor: "pointer" }}
+          >
+            ‹ Back
+          </button>
+        )}
+        <div style={{ marginTop: 26, fontFamily: SERIF, fontSize: 44, lineHeight: 1.02 }}>
+          {editing ? "You" : "Get started"}
+        </div>
         <div style={{ marginTop: 10, font: `400 16px ${ARCHIVO}`, lineHeight: 1.45, color: MUTED_1, maxWidth: 280 }}>
           Your name is what your friends see on every entry.
         </div>
@@ -155,7 +169,7 @@ export function StartScreen({ colors: C, accent, onPickAccent, busy, onSave }: S
             color: ready ? "#fff" : MUTED_3,
           }}
         >
-          Open the ledger
+          {editing ? "Save" : "Open the ledger"}
         </button>
       </div>
     </div>

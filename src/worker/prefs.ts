@@ -1,6 +1,5 @@
 import type { Hono } from "hono";
 import type { AppContext } from "./env";
-import type { LedgerSummary } from "../shared/types";
 import { orderMembers } from "../shared/ledger";
 import { isAccentColor, looksLikeEmail } from "../shared/prefs";
 import { listLedgers } from "./db";
@@ -16,12 +15,21 @@ export function registerPrefs(app: Hono<AppContext>): void {
       trim: true,
       max: 80,
     });
-    let accent: string | null = null;
-    if (body.accent_color !== undefined && body.accent_color !== null) {
-      if (!isAccentColor(body.accent_color)) {
-        throw new ValidationError("accent_color must be one of the app palette");
-      }
+    // Absent field = keep the stored value; explicit null = clear it.
+    let accent: string | null;
+    if (!("accent_color" in body)) {
+      const existing = await c.env.DB.prepare(
+        "SELECT accent_color FROM users WHERE email = ?1",
+      )
+        .bind(email)
+        .first<{ accent_color: string | null }>();
+      accent = existing?.accent_color ?? null;
+    } else if (body.accent_color === null) {
+      accent = null;
+    } else if (isAccentColor(body.accent_color)) {
       accent = body.accent_color;
+    } else {
+      throw new ValidationError("accent_color must be one of the app palette");
     }
     await c.env.DB.prepare(
       `INSERT INTO users (email, display_name, accent_color, created_at)
@@ -73,7 +81,12 @@ export function registerPrefs(app: Hono<AppContext>): void {
     }
 
     const summaries = await listLedgers(c.env.DB, email);
-    const summary = summaries.find((l) => l.id === pair.id) as LedgerSummary;
+    const summary = summaries.find((l) => l.id === pair.id);
+    if (!summary) {
+      // The caller is a member of the pair by construction; not finding it
+      // means listLedgers broke — fail loudly rather than serialize {}.
+      throw new Error(`ledger ${pair.id} missing from creator's own list`);
+    }
     return c.json({ ledger: summary }, insert.meta.changes === 1 ? 201 : 200);
   });
 }

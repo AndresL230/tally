@@ -64,6 +64,8 @@ export default function App() {
   // Onboarding accent preview: the picked swatch recolors the whole shell
   // live (through colorsFor) before anything is saved.
   const [startAccent, setStartAccent] = useState<string>(DEFAULT_ACCENT);
+  // Prefs editing after onboarding (M3 review F5): reachable from the picker.
+  const [editingPrefs, setEditingPrefs] = useState(false);
 
   // One idempotency id per user commit intent (contract rule 4). It is
   // minted on the first attempt and reused verbatim if that attempt fails
@@ -173,6 +175,37 @@ export default function App() {
   const colors = colorsFor(me.accent_color);
 
   // ---- Picker: the root screen whenever no ledger is open -----------------
+  if (editingPrefs) {
+    const preview = colorsFor(startAccent);
+    return (
+      <Shell accent={preview.me}>
+        {flash && <FlashNote accent={preview.me}>{flash}</FlashNote>}
+        <StartScreen
+          colors={preview}
+          accent={startAccent}
+          onPickAccent={setStartAccent}
+          busy={busy}
+          initialName={me.display_name ?? ""}
+          onCancel={() => setEditingPrefs(false)}
+          onSave={async (prefs) => {
+            if (busy) return;
+            setBusy(true);
+            try {
+              const updated = await api.updateMe(prefs);
+              setFlash(null);
+              patchBoot({ me: updated });
+              setEditingPrefs(false);
+            } catch (err) {
+              setFlash(describeError(err));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+      </Shell>
+    );
+  }
+
   if (!detail || screen.name === "picker") {
     return (
       <Shell accent={colors.me}>
@@ -211,6 +244,10 @@ export default function App() {
             ]);
             patchBoot({ ledgers: nextLedgers, detail: nextDetail });
             nav({ name: "ledger" });
+          }}
+          onEditPrefs={() => {
+            setStartAccent(me.accent_color ?? DEFAULT_ACCENT);
+            setEditingPrefs(true);
           }}
         />
       </Shell>
@@ -514,19 +551,17 @@ export default function App() {
         setFlow(null);
         nav({ name: "manual", reason: "byhand" });
       }}
-      onBackToPicker={
-        ledgers.length > 1
-          ? () => {
-              nav({ name: "picker" });
-              // Refresh the summaries behind the navigation so the list is
-              // current when it appears.
-              api
-                .ledgers()
-                .then(({ ledgers: nextLedgers }) => patchBoot({ ledgers: nextLedgers }))
-                .catch(() => {});
-            }
-          : undefined
-      }
+      onBackToPicker={() => {
+        // Always reachable (M3 review F1): with exactly one ledger this is
+        // the ONLY road to "+ New ledger" and to prefs.
+        nav({ name: "picker" });
+        // Refresh the summaries behind the navigation so the list is
+        // current when it appears.
+        api
+          .ledgers()
+          .then(({ ledgers: nextLedgers }) => patchBoot({ ledgers: nextLedgers }))
+          .catch(() => {});
+      }}
     />
   );
 

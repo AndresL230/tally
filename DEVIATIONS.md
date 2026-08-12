@@ -82,3 +82,19 @@ exactly one expense (the loser gets a 409). Residual known gap: a worker
 that dies mid-extraction leaves 'extracting' until the client's poll
 gives up and offers manual entry; there is no timed reclaim (no
 updated_at column). Judged acceptable for a two-person app.
+
+## D10. Navigation and prefs affordances the mockup never drew
+
+The mockup has no route back to the picker, no new-ledger flow, and no
+way to edit prefs after onboarding. Rulings made while building M3 (all
+in the mockup's visual vocabulary): the ledger screen always shows a
+"‹ Ledgers" back button (with exactly one ledger it is the only road to
+"+ New ledger"); the picker carries the inline new-ledger email form and
+a muted "Edit your name and color ›" link that reopens the onboarding
+screen in edit mode. Onboarding copy generalizes the mockup's
+friend-specific lines ("what your friends see", "Their item") because at
+onboarding no friend exists yet. A ledger created with a mistyped email
+sits unused until that address is added to the Access policy — the
+policy is the real gatekeeper (rule: adding a friend = policy AND
+ledger); there is no ledger deletion, deliberately, in an append-only
+system.

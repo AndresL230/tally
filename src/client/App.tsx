@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import type { ApiEntry, LedgerDetail, LedgerSummary, UserPrefs } from "../shared/types";
+import type { ApiEntry, ApiItem, ApiReceipt, LedgerDetail, LedgerSummary, UserPrefs } from "../shared/types";
 import { otherMember, viewerDelta } from "../shared/ledger";
 import { ApiError, api } from "./api";
+import { downscaleImage } from "./image";
 import { ARCHIVO, MONO, SERIF, colorsFor } from "./theme";
 import { LedgerScreen } from "./screens/LedgerScreen";
 import { ManualScreen, type ManualCommit } from "./screens/ManualScreen";
 import { SettleScreen } from "./screens/SettleScreen";
 import { DetailScreen } from "./screens/DetailScreen";
+import { ReadingScreen, type ReadingPhase } from "./screens/ReadingScreen";
+import { ConfirmScreen, type ConfirmCommit } from "./screens/ConfirmScreen";
+import { PercentScreen } from "./screens/PercentScreen";
 import { todayISO } from "./util";
 
 export function friendDisplayName(detail: LedgerDetail): string {
@@ -22,25 +26,39 @@ type Boot =
   | { phase: "error"; message: string }
   | { phase: "ready"; me: UserPrefs; ledgers: LedgerSummary[]; detail: LedgerDetail | null };
 
-// The mockup-style screen state machine. M1 navigates ledger / manual /
-// settle / detail; percent joins in M2 (extraction fallback), picker and
-// onboarding in M3.
+// The mockup-style screen state machine. M2 adds the receipt pipeline:
+// reading -> confirm | percent | manual(photofail).
 type Screen =
   | { name: "ledger" }
-  | { name: "manual" }
+  | { name: "manual"; reason: "byhand" | "photofail" }
   | { name: "settle" }
-  | { name: "detail"; entryId: string };
+  | { name: "detail"; entryId: string }
+  | { name: "reading" }
+  | { name: "confirm" }
+  | { name: "percent" };
+
+/** The in-flight receipt: set once the upload lands, cleared when the flow
+ *  ends (commit, discard, or a new scan). */
+interface ReceiptFlow {
+  receipt: ApiReceipt;
+  items: ApiItem[];
+}
 
 function describeError(err: unknown): string {
   if (err instanceof ApiError) return `That didn't save (${err.message}). Try again.`;
   return "That didn't save — check the connection and try again.";
 }
 
+const IDLE_PHASE: ReadingPhase = { step: 0, merchant: null, itemCount: null, totalCents: null };
+
 export default function App() {
   const [boot, setBoot] = useState<Boot>({ phase: "loading" });
   const [screen, setScreen] = useState<Screen>({ name: "ledger" });
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
+  const [flow, setFlow] = useState<ReceiptFlow | null>(null);
+  const [reading, setReading] = useState<ReadingPhase>(IDLE_PHASE);
+
   // One idempotency id per user commit intent (contract rule 4). It is
   // minted on the first attempt and reused verbatim if that attempt fails
   // and the user retries; it clears on success or navigation.
@@ -48,6 +66,29 @@ export default function App() {
   const takeIntentId = () => intentRef.current ?? (intentRef.current = crypto.randomUUID());
   const clearIntent = () => {
     intentRef.current = null;
+  };
+
+  // Scan-flow plumbing: a token invalidates stale timers/continuations
+  // (Cancel on the reading screen aborts navigation, not the request).
+  const scanTokenRef = useRef(0);
+  const scanTimerRef = useRef<number | null>(null);
+  const stopScanTimer = () => {
+    if (scanTimerRef.current !== null) {
+      window.clearInterval(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
+  };
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const libraryInputRef = useRef<HTMLInputElement>(null);
+  // The receipt upload gets its own UUID, one per photo: re-picking the
+  // same file (a retry) reuses it, so the repeat POST is the dedupe path.
+  const lastPickRef = useRef<{ key: string; id: string } | null>(null);
+  const receiptIdFor = (file: File) => {
+    const key = `${file.name}|${file.size}|${file.lastModified}`;
+    if (lastPickRef.current?.key !== key) {
+      lastPickRef.current = { key, id: crypto.randomUUID() };
+    }
+    return lastPickRef.current.id;
   };
 
   useEffect(() => {
@@ -62,6 +103,8 @@ export default function App() {
       }
     })();
   }, []);
+
+  useEffect(() => stopScanTimer, []);
 
   const nav = (next: Screen) => {
     clearIntent();
@@ -115,6 +158,126 @@ export default function App() {
     setScreen({ name: "ledger" });
   };
 
+  // ---- The M2 receipt pipeline -------------------------------------------
+
+  /** Downscale -> reading screen -> upload -> extract -> route per contract.
+   *  ONE round-trip; the reading steps are presentation while it runs. */
+  const runScan = async (file: File) => {
+    const token = ++scanTokenRef.current;
+    const live = () => scanTokenRef.current === token;
+    // The upload's own idempotency UUID: minted once per photo, reused on a
+    // retry of the same file, and the receipt PK server-side. (Re-shooting
+    // the same paper receipt dedupes on the image SHA-256 regardless.)
+    const receiptId = receiptIdFor(file);
+
+    clearIntent();
+    setFlow(null);
+    setFlash(null);
+    setReading({ ...IDLE_PHASE });
+    setScreen({ name: "reading" });
+    stopScanTimer();
+    scanTimerRef.current = window.setInterval(() => {
+      // Steps advance on the clock, but the LAST one never completes
+      // before the response arrives (cap at "current", never "done").
+      setReading((r) => ({ ...r, step: Math.min(r.step + 1, 3) }));
+    }, 950);
+
+    /** Complete the remaining steps with real values, then navigate after a beat. */
+    const finish = (receipt: ApiReceipt, items: ApiItem[], dest: Screen) => {
+      stopScanTimer();
+      setReading({
+        step: 4,
+        merchant: receipt.merchant,
+        itemCount: items.length,
+        totalCents: receipt.total_cents,
+      });
+      window.setTimeout(() => {
+        if (!live()) return;
+        setScreen(dest);
+      }, 900);
+    };
+
+    try {
+      const blob = await downscaleImage(file);
+      const up = await api.uploadReceipt(detail.ledger.id, receiptId, blob);
+      if (!live()) return;
+
+      // Dedupe UX: same bytes as a receipt that's already posted — nothing
+      // to re-add.
+      if (up.receipt.status === "posted") {
+        stopScanTimer();
+        scanTokenRef.current++;
+        setScreen({ name: "ledger" });
+        setFlash("That receipt is already on the ledger.");
+        return;
+      }
+
+      let { receipt, items } = up;
+      setFlow({ receipt, items });
+      if (receipt.status !== "needs_review" && receipt.status !== "failed") {
+        // Fresh upload (or a dedupe onto a not-yet-extracted/discarded
+        // receipt): run the extraction round-trip. A cache hit server-side
+        // returns the stored result without a model call.
+        const extracted = await api.extractReceipt(receipt.id);
+        if (!live()) return;
+        receipt = extracted.receipt;
+        items = extracted.items;
+        setFlow({ receipt, items });
+      }
+
+      if (receipt.status === "failed") {
+        stopScanTimer();
+        setScreen({ name: "manual", reason: "photofail" });
+        return;
+      }
+      if (items.length > 0) {
+        finish(receipt, items, { name: "confirm" });
+      } else if (receipt.total_cents !== null) {
+        finish(receipt, items, { name: "percent" });
+      } else {
+        // Nothing usable on the photo.
+        stopScanTimer();
+        setScreen({ name: "manual", reason: "photofail" });
+      }
+    } catch (err) {
+      // Upload failure, extraction 503 ("extraction not configured"),
+      // extract 409/500, network: all land on the photo-failed manual copy.
+      if (!live()) return;
+      console.warn("receipt scan failed", err);
+      stopScanTimer();
+      setScreen({ name: "manual", reason: "photofail" });
+    }
+  };
+
+  const onFilePicked: React.ChangeEventHandler<HTMLInputElement> = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file later
+    if (file) void runScan(file);
+  };
+
+  /** Reading-screen Cancel: abort navigation; the receipt stays (the user
+   *  can discard it later by cancelling from confirm/percent). */
+  const cancelReading = () => {
+    scanTokenRef.current++;
+    stopScanTimer();
+    nav({ name: "ledger" });
+  };
+
+  /** Confirm/percent Cancel: the receipt is abandoned — discard it
+   *  fire-and-forget and go back to the ledger. */
+  const cancelAndDiscard = () => {
+    if (flow) {
+      api.discardReceipt(flow.receipt.id).catch(() => {
+        // fire-and-forget: a failed discard leaves a needs_review orphan,
+        // which the dedupe path resurrects if the photo comes back
+      });
+      setFlow(null);
+    }
+    nav({ name: "ledger" });
+  };
+
+  // ---- Commits ------------------------------------------------------------
+
   const commitManual = async (payload: ManualCommit) => {
     if (busy) return;
     setBusy(true);
@@ -128,12 +291,67 @@ export default function App() {
         method: "manual",
         other_share_cents: payload.other_share_cents,
         note: "Entered by hand.",
+        // A photo-failed manual entry keeps the receipt link when one exists.
+        ...(flow ? { receipt_id: flow.receipt.id } : {}),
       });
       clearIntent();
+      setFlow(null);
       await afterMutation();
     } catch (err) {
       // Stay on the screen; the intent id survives only if the POST itself
       // failed, so a retry is a no-op server-side if it actually landed.
+      setFlash(describeError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const commitConfirm = async (payload: ConfirmCommit) => {
+    if (busy || !flow) return;
+    setBusy(true);
+    try {
+      await api.postExpense(detail.ledger.id, {
+        id: takeIntentId(),
+        occurred_on: payload.occurred_on,
+        merchant: payload.merchant,
+        total_cents: payload.total_cents,
+        payer: payload.payer,
+        method: "items",
+        receipt_id: flow.receipt.id,
+        items: payload.items,
+      });
+      clearIntent();
+      setFlow(null);
+      await afterMutation();
+    } catch (err) {
+      setFlash(describeError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Percent fallback for a receipt whose total came through without line
+   *  items. otherShareCents is the NON-PAYER's share from the slider. */
+  const commitPercent = async (otherShareCents: number) => {
+    if (busy || !flow) return;
+    const r = flow.receipt;
+    setBusy(true);
+    try {
+      await api.postExpense(detail.ledger.id, {
+        id: takeIntentId(),
+        occurred_on: r.purchased_on ?? todayISO(),
+        merchant: r.merchant ?? "Receipt",
+        total_cents: r.total_cents ?? 0,
+        payer: detail.viewer,
+        method: "percent",
+        other_share_cents: otherShareCents,
+        note: "Halved by percentage — no line items on the photo.",
+        receipt_id: r.id,
+      });
+      clearIntent();
+      setFlow(null);
+      await afterMutation();
+    } catch (err) {
       setFlash(describeError(err));
     } finally {
       setBusy(false);
@@ -180,18 +398,40 @@ export default function App() {
     }
   };
 
+  // ---- Screens ------------------------------------------------------------
+
+  const ledgerScreen = (
+    <LedgerScreen
+      detail={detail}
+      colors={colors}
+      friendName={friendName}
+      onOpenEntry={(entry) => nav({ name: "detail", entryId: entry.id })}
+      onSettle={() => nav({ name: "settle" })}
+      onTakePhoto={() => cameraInputRef.current?.click()}
+      onChooseFromLibrary={() => libraryInputRef.current?.click()}
+      onEnterByHand={() => {
+        setFlow(null);
+        nav({ name: "manual", reason: "byhand" });
+      }}
+    />
+  );
+
   let body: React.ReactNode;
   switch (screen.name) {
     case "manual":
       body = (
         <ManualScreen
-          reason="byhand"
+          reason={screen.reason}
           colors={colors}
           friendName={friendName}
           viewerEmail={detail.viewer}
           friendEmail={friendEmail}
-          onCancel={() => nav({ name: "ledger" })}
+          onCancel={() => {
+            setFlow(null);
+            nav({ name: "ledger" });
+          }}
           onCommit={commitManual}
+          onRetake={() => cameraInputRef.current?.click()}
         />
       );
       break;
@@ -206,20 +446,61 @@ export default function App() {
         />
       );
       break;
+    case "reading":
+      body = <ReadingScreen colors={colors} phase={reading} onCancel={cancelReading} />;
+      break;
+    case "confirm":
+      if (!flow) {
+        body = ledgerScreen;
+        break;
+      }
+      body = (
+        <ConfirmScreen
+          key={flow.receipt.id}
+          colors={colors}
+          friendName={friendName}
+          viewerEmail={detail.viewer}
+          friendEmail={friendEmail}
+          receipt={{
+            merchant: flow.receipt.merchant,
+            purchased_on: flow.receipt.purchased_on,
+            total_cents: flow.receipt.total_cents,
+          }}
+          initialItems={flow.items}
+          busy={busy}
+          onCancel={cancelAndDiscard}
+          onCommit={commitConfirm}
+          onFallbackPercent={() =>
+            nav(flow.receipt.total_cents !== null ? { name: "percent" } : { name: "manual", reason: "photofail" })
+          }
+        />
+      );
+      break;
+    case "percent":
+      if (!flow || flow.receipt.total_cents === null) {
+        body = ledgerScreen;
+        break;
+      }
+      body = (
+        <PercentScreen
+          key={flow.receipt.id}
+          colors={colors}
+          friendName={friendName}
+          merchant={flow.receipt.merchant ?? "Receipt"}
+          occurredOn={flow.receipt.purchased_on ?? todayISO()}
+          totalCents={flow.receipt.total_cents}
+          payer={detail.viewer}
+          viewerEmail={detail.viewer}
+          onCancel={cancelAndDiscard}
+          onCommit={commitPercent}
+        />
+      );
+      break;
     case "detail": {
       const entry = detail.entries.find((e) => e.id === screen.entryId);
       if (!entry) {
         // The entry vanished from a refetch — show the ledger instead.
-        body = (
-          <LedgerScreen
-            detail={detail}
-            colors={colors}
-            friendName={friendName}
-            onOpenEntry={(e) => nav({ name: "detail", entryId: e.id })}
-            onSettle={() => nav({ name: "settle" })}
-            onEnterByHand={() => nav({ name: "manual" })}
-          />
-        );
+        body = ledgerScreen;
         break;
       }
       body = (
@@ -236,16 +517,7 @@ export default function App() {
       break;
     }
     default:
-      body = (
-        <LedgerScreen
-          detail={detail}
-          colors={colors}
-          friendName={friendName}
-          onOpenEntry={(entry) => nav({ name: "detail", entryId: entry.id })}
-          onSettle={() => nav({ name: "settle" })}
-          onEnterByHand={() => nav({ name: "manual" })}
-        />
-      );
+      body = ledgerScreen;
   }
 
   return (
@@ -265,6 +537,17 @@ export default function App() {
         </div>
       )}
       {body}
+      {/* Hidden pickers behind the add-receipt sheet's photo buttons; the
+          camera one is also what "Retake photo" re-opens. */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={onFilePicked}
+      />
+      <input ref={libraryInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFilePicked} />
     </Shell>
   );
 }

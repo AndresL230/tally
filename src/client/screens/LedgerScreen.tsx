@@ -19,6 +19,10 @@ export interface LedgerScreenProps {
   friendName: string;
   onOpenEntry?: (entry: ApiEntry) => void;
   onSettle?: () => void;
+  /** The add-receipt sheet's "Take a photo" action (camera capture). */
+  onTakePhoto?: () => void;
+  /** The add-receipt sheet's "Choose from library" action. */
+  onChooseFromLibrary?: () => void;
   /** The add-receipt sheet's "Enter it by hand" action. */
   onEnterByHand?: () => void;
 }
@@ -29,6 +33,8 @@ export function LedgerScreen({
   friendName: F,
   onOpenEntry,
   onSettle,
+  onTakePhoto,
+  onChooseFromLibrary,
   onEnterByHand,
 }: LedgerScreenProps) {
   const [sheet, setSheet] = useState(false);
@@ -274,9 +280,39 @@ export function LedgerScreen({
               Add a receipt
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {/* TODO(M2): the "Take a photo" (accent-filled, 60px) and
-                  "Choose from library" (outline, 60px) actions from the
-                  mockup land here with the receipt pipeline. */}
+              <button
+                onClick={() => {
+                  setSheet(false);
+                  onTakePhoto?.();
+                }}
+                style={{
+                  height: 60,
+                  borderRadius: 16,
+                  border: 0,
+                  background: C.me,
+                  color: "#fff",
+                  font: `600 16px ${ARCHIVO}`,
+                  cursor: "pointer",
+                }}
+              >
+                Take a photo
+              </button>
+              <button
+                onClick={() => {
+                  setSheet(false);
+                  onChooseFromLibrary?.();
+                }}
+                style={{
+                  height: 60,
+                  borderRadius: 16,
+                  border: "1px solid rgba(0,0,0,.18)",
+                  background: "transparent",
+                  font: `600 16px ${ARCHIVO}`,
+                  cursor: "pointer",
+                }}
+              >
+                Choose from library
+              </button>
               <button
                 onClick={() => {
                   setSheet(false);

@@ -3,9 +3,10 @@ import type { ApiEntry, ApiItem, ApiReceipt, LedgerDetail, LedgerSummary, UserPr
 import { otherMember, viewerDelta } from "../shared/ledger";
 import { ApiError, api } from "./api";
 import { downscaleImage } from "./image";
-import { ARCHIVO, DEFAULT_ACCENT, MONO, SERIF, colorsFor } from "./theme";
+import { ARCHIVO, DEFAULT_ACCENT, MONO, SERIF, colorsFor, type Colors } from "./theme";
 import { LedgerScreen } from "./screens/LedgerScreen";
 import { PickerScreen } from "./screens/PickerScreen";
+import { DesktopShell, PaneEmptyState, useIsDesktop, type DesktopRailProps } from "./components/DesktopShell";
 import { StartScreen } from "./screens/StartScreen";
 import { ManualScreen, type ManualCommit } from "./screens/ManualScreen";
 import { SettleScreen } from "./screens/SettleScreen";
@@ -61,6 +62,10 @@ export default function App() {
   const [flash, setFlash] = useState<string | null>(null);
   const [flow, setFlow] = useState<ReceiptFlow | null>(null);
   const [reading, setReading] = useState<ReadingPhase>(IDLE_PHASE);
+  // Desktop (≥900px) renders the same screen state machine in a two-pane
+  // shell; below the breakpoint everything is exactly the phone app.
+  const isDesktop = useIsDesktop();
+  const [dragOver, setDragOver] = useState(false);
   // Onboarding accent preview: the picked swatch recolors the whole shell
   // live (through colorsFor) before anything is saved.
   const [startAccent, setStartAccent] = useState<string>(DEFAULT_ACCENT);
@@ -116,6 +121,25 @@ export default function App() {
 
   useEffect(() => stopScanTimer, []);
 
+  // Escape backs out of whatever the visible Cancel/back button would; the
+  // ref is (re)assigned every render so the listener always sees the current
+  // screen's action. Null where there is nothing to cancel.
+  const escapeRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      // Let inputs keep their own Escape behavior (e.g. clearing).
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      escapeRef.current?.();
+    };
+    const listener = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onKey(e);
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, []);
+  escapeRef.current = null; // default; the deep render path overrides it
+
   const nav = (next: Screen) => {
     clearIntent();
     setFlash(null);
@@ -143,11 +167,49 @@ export default function App() {
     setBoot((b) => (b.phase === "ready" ? { ...b, ...patch } : b));
   };
 
+  // Shared by the phone picker and the desktop rail.
+  const openLedger = async (summary: LedgerSummary) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const next = await api.ledger(summary.id);
+      patchBoot({ detail: next });
+      nav({ name: "ledger" });
+    } catch (err) {
+      setFlash(
+        err instanceof ApiError
+          ? `That ledger didn't open (${err.message}). Try again.`
+          : "That ledger didn't open — check the connection and try again.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createLedger = async (friendEmail: string) => {
+    // Fresh UUID per attempt: the server is idempotent by PAIR, so a
+    // repeat returns 200 with the existing ledger — landing on it is
+    // the correct UX. Errors propagate to the form's inline notice.
+    const { ledger } = await api.createLedger({ id: crypto.randomUUID(), friend_email: friendEmail });
+    const [{ ledgers: nextLedgers }, nextDetail] = await Promise.all([api.ledgers(), api.ledger(ledger.id)]);
+    patchBoot({ ledgers: nextLedgers, detail: nextDetail });
+    nav({ name: "ledger" });
+  };
+
+  const railFor = (C: Colors): DesktopRailProps => ({
+    ledgers,
+    viewerEmail: me.email,
+    colors: C,
+    activeLedgerId: detail?.ledger.id ?? null,
+    onOpen: openLedger,
+    onCreate: createLedger,
+  });
+
   // ---- Onboarding: no display name yet -> prefs first (decision B) --------
   if (me.display_name === null) {
     const preview = colorsFor(startAccent);
-    return (
-      <Shell accent={preview.me}>
+    const start = (
+      <>
         {flash && <FlashNote accent={preview.me}>{flash}</FlashNote>}
         <StartScreen
           colors={preview}
@@ -168,7 +230,14 @@ export default function App() {
             }
           }}
         />
-      </Shell>
+      </>
+    );
+    return isDesktop ? (
+      <DesktopShell accent={preview.me} rail={railFor(preview)} railInert>
+        {start}
+      </DesktopShell>
+    ) : (
+      <Shell accent={preview.me}>{start}</Shell>
     );
   }
 
@@ -177,8 +246,8 @@ export default function App() {
   // ---- Picker: the root screen whenever no ledger is open -----------------
   if (editingPrefs) {
     const preview = colorsFor(startAccent);
-    return (
-      <Shell accent={preview.me}>
+    const editor = (
+      <>
         {flash && <FlashNote accent={preview.me}>{flash}</FlashNote>}
         <StartScreen
           colors={preview}
@@ -202,56 +271,53 @@ export default function App() {
             }
           }}
         />
-      </Shell>
+      </>
+    );
+    return isDesktop ? (
+      <DesktopShell accent={preview.me} rail={railFor(preview)} railInert>
+        {editor}
+      </DesktopShell>
+    ) : (
+      <Shell accent={preview.me}>{editor}</Shell>
     );
   }
 
-  if (!detail || screen.name === "picker") {
-    return (
-      <Shell accent={colors.me}>
+  const startPrefsEdit = () => {
+    setStartAccent(me.accent_color ?? DEFAULT_ACCENT);
+    setEditingPrefs(true);
+  };
+
+  const phonePicker = (
+    <Shell accent={colors.me}>
+      {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
+      <PickerScreen
+        ledgers={ledgers}
+        viewerEmail={me.email}
+        colors={colors}
+        activeLedgerId={detail?.ledger.id ?? null}
+        createOpenByDefault={ledgers.length === 0}
+        onOpen={openLedger}
+        onCreate={createLedger}
+        onEditPrefs={startPrefsEdit}
+      />
+    </Shell>
+  );
+
+  if (!detail) {
+    // Desktop: the rail IS the picker; the pane gets a quiet empty state.
+    return isDesktop ? (
+      <DesktopShell accent={colors.me} rail={{ ...railFor(colors), onEditPrefs: startPrefsEdit }}>
         {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
-        <PickerScreen
-          ledgers={ledgers}
-          viewerEmail={me.email}
-          colors={colors}
-          activeLedgerId={detail?.ledger.id ?? null}
-          createOpenByDefault={ledgers.length === 0}
-          onOpen={async (summary) => {
-            if (busy) return;
-            setBusy(true);
-            try {
-              const next = await api.ledger(summary.id);
-              patchBoot({ detail: next });
-              nav({ name: "ledger" });
-            } catch (err) {
-              setFlash(
-                err instanceof ApiError
-                  ? `That ledger didn't open (${err.message}). Try again.`
-                  : "That ledger didn't open — check the connection and try again.",
-              );
-            } finally {
-              setBusy(false);
-            }
-          }}
-          onCreate={async (friendEmail) => {
-            // Fresh UUID per attempt: the server is idempotent by PAIR, so a
-            // repeat returns 200 with the existing ledger — landing on it is
-            // the correct UX. Errors propagate to the picker's inline notice.
-            const { ledger } = await api.createLedger({ id: crypto.randomUUID(), friend_email: friendEmail });
-            const [{ ledgers: nextLedgers }, nextDetail] = await Promise.all([
-              api.ledgers(),
-              api.ledger(ledger.id),
-            ]);
-            patchBoot({ ledgers: nextLedgers, detail: nextDetail });
-            nav({ name: "ledger" });
-          }}
-          onEditPrefs={() => {
-            setStartAccent(me.accent_color ?? DEFAULT_ACCENT);
-            setEditingPrefs(true);
-          }}
-        />
-      </Shell>
+        <PaneEmptyState hasLedgers={ledgers.length > 0} />
+      </DesktopShell>
+    ) : (
+      phonePicker
     );
+  }
+  // Phone-only: the full-screen picker state. On desktop the rail is always
+  // visible, so "picker" simply renders the open ledger in the pane.
+  if (!isDesktop && screen.name === "picker") {
+    return phonePicker;
   }
 
   const friendName = friendDisplayName(detail);
@@ -551,17 +617,23 @@ export default function App() {
         setFlow(null);
         nav({ name: "manual", reason: "byhand" });
       }}
-      onBackToPicker={() => {
-        // Always reachable (M3 review F1): with exactly one ledger this is
-        // the ONLY road to "+ New ledger" and to prefs.
-        nav({ name: "picker" });
-        // Refresh the summaries behind the navigation so the list is
-        // current when it appears.
-        api
-          .ledgers()
-          .then(({ ledgers: nextLedgers }) => patchBoot({ ledgers: nextLedgers }))
-          .catch(() => {});
-      }}
+      onBackToPicker={
+        // Desktop: the rail is always visible, so the back link would be
+        // a no-op — suppress it. Phone: always reachable (M3 review F1);
+        // with exactly one ledger this is the ONLY road to "+ New ledger"
+        // and to prefs.
+        isDesktop
+          ? undefined
+          : () => {
+              nav({ name: "picker" });
+              // Refresh the summaries behind the navigation so the list is
+              // current when it appears.
+              api
+                .ledgers()
+                .then(({ ledgers: nextLedgers }) => patchBoot({ ledgers: nextLedgers }))
+                .catch(() => {});
+            }
+      }
     />
   );
 
@@ -670,12 +742,36 @@ export default function App() {
       body = ledgerScreen;
   }
 
-  return (
-    <Shell accent={colors.me}>
-      {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
-      {body}
-      {/* Hidden pickers behind the add-receipt sheet's photo buttons; the
-          camera one is also what "Retake photo" re-opens. */}
+  // Escape mirrors the visible Cancel/back control of the current screen.
+  if (!busy) {
+    switch (screen.name) {
+      case "reading":
+        escapeRef.current = cancelReading;
+        break;
+      case "confirm":
+      case "percent":
+        escapeRef.current = cancelAndDiscard;
+        break;
+      case "manual":
+        escapeRef.current = () => {
+          setFlow(null);
+          nav({ name: "ledger" });
+        };
+        break;
+      case "settle":
+      case "detail":
+        escapeRef.current = () => nav({ name: "ledger" });
+        break;
+      default:
+        escapeRef.current = null;
+    }
+  }
+
+  // Hidden pickers behind the add-receipt sheet's photo buttons; the camera
+  // one is also what "Retake photo" re-opens. On desktop the browser ignores
+  // `capture` and both open the file dialog.
+  const hiddenInputs = (
+    <>
       <input
         ref={cameraInputRef}
         type="file"
@@ -685,6 +781,64 @@ export default function App() {
         onChange={onFilePicked}
       />
       <input ref={libraryInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFilePicked} />
+    </>
+  );
+
+  if (isDesktop) {
+    const canDrop = screen.name === "ledger";
+    return (
+      <DesktopShell accent={colors.me} rail={{ ...railFor(colors), onEditPrefs: startPrefsEdit }}>
+        {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
+        <div
+          style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+          onDragOver={(e) => {
+            if (!canDrop || busy) return;
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={(e) => {
+            if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return;
+            setDragOver(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            if (!canDrop || busy) return;
+            const file = e.dataTransfer.files?.[0];
+            if (file && file.type.startsWith("image/")) void runScan(file);
+          }}
+        >
+          {body}
+          {dragOver && canDrop && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 8,
+                borderRadius: 16,
+                border: `2px dashed ${colors.me}`,
+                background: "rgba(242,239,231,.92)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                pointerEvents: "none",
+                font: `600 15px ${ARCHIVO}`,
+                color: colors.me,
+              }}
+            >
+              Drop the receipt photo
+            </div>
+          )}
+        </div>
+        {hiddenInputs}
+      </DesktopShell>
+    );
+  }
+
+  return (
+    <Shell accent={colors.me}>
+      {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
+      {body}
+      {hiddenInputs}
     </Shell>
   );
 }

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BackLink } from "../components/BackLink";
 import type { CSSProperties } from "react";
 import type { ApiEntry, LedgerDetail } from "../../shared/types";
 import { otherMember, viewerDelta } from "../../shared/ledger";
@@ -144,13 +145,8 @@ export function DetailScreen({ entry, detail, colors: C, friendName: F, onBack, 
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px 22px 24px" }}>
-        <button
-          onClick={onBack}
-          style={{ border: 0, background: "transparent", padding: 0, font: `500 14px ${ARCHIVO}`, color: MUTED_3, cursor: "pointer" }}
-        >
-          ‹ Ledger
-        </button>
-        <div style={{ marginTop: 16, fontFamily: SERIF, fontSize: 34, lineHeight: 1.08 }}>{title}</div>
+        <BackLink onClick={onBack}>‹ Ledger</BackLink>
+        <div style={{ marginTop: 22, fontFamily: SERIF, fontSize: 34, lineHeight: 1.08 }}>{title}</div>
         <div style={{ marginTop: 6, font: `500 13px ${MONO}`, color: MUTED_3 }}>
           {longDate(entry.occurred_on)} · {payerLine}
         </div>

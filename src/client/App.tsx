@@ -784,13 +784,25 @@ export default function App() {
     </>
   );
 
+  // Remount + rise-in when the screen changes, so navigation reads as a
+  // transition instead of a hard swap (same keyframe the receipt card uses).
+  const screenKey = screen.name === "detail" ? `detail-${screen.entryId}` : screen.name;
+
   if (isDesktop) {
     const canDrop = screen.name === "ledger";
     return (
       <DesktopShell accent={colors.me} rail={{ ...railFor(colors), onEditPrefs: startPrefsEdit }}>
         {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
         <div
-          style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}
+          key={screenKey}
+          style={{
+            position: "relative",
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            animation: "riseIn .22s ease both",
+          }}
           onDragOver={(e) => {
             if (!canDrop || busy) return;
             e.preventDefault();
@@ -837,7 +849,12 @@ export default function App() {
   return (
     <Shell accent={colors.me}>
       {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
-      {body}
+      <div
+        key={screenKey}
+        style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", animation: "riseIn .22s ease both" }}
+      >
+        {body}
+      </div>
       {hiddenInputs}
     </Shell>
   );

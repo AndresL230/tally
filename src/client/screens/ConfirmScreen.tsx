@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { BackLink } from "../components/BackLink";
 import type { CSSProperties } from "react";
 import type { ApiItem } from "../../shared/types";
 import { divRoundHalfUp, splitItems } from "../../shared/money";
@@ -209,12 +210,7 @@ export function ConfirmScreen({
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div style={{ flex: "none", padding: "4px 22px 16px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <button
-            onClick={onCancel}
-            style={{ border: 0, background: "transparent", padding: 0, font: `500 14px ${ARCHIVO}`, color: MUTED_3, cursor: "pointer" }}
-          >
-            Cancel
-          </button>
+          <BackLink onClick={onCancel}>Cancel</BackLink>
           <span style={{ font: `600 10px ${ARCHIVO}`, letterSpacing: ".16em", textTransform: "uppercase", color: MUTED_3 }}>
             Check the receipt
           </span>
@@ -248,6 +244,7 @@ export function ConfirmScreen({
               }}
               style={{
                 width: "100%",
+                height: 30,
                 border: 0,
                 borderBottom: "1px solid rgba(0,0,0,.18)",
                 paddingBottom: 5,
@@ -264,6 +261,7 @@ export function ConfirmScreen({
               onBlur={commitTotal}
               style={{
                 width: "100%",
+                height: 30,
                 border: 0,
                 borderBottom: "1px solid rgba(0,0,0,.18)",
                 paddingBottom: 5,
@@ -558,8 +556,12 @@ export function ConfirmScreen({
             }}
           />
         </div>
-        <div style={{ marginTop: 14, font: `400 12px ${MONO}`, color: MUTED_4, lineHeight: 1.6 }}>
-          Tap once: yours. Twice: half each. Again: back to {F}'s.
+        <div style={{ marginTop: 14, font: `400 12.5px ${MONO}`, color: MUTED_4, lineHeight: 1.65 }}>
+          How assigning works: every item starts as {F}'s. Tap it once to make
+          it yours, twice to split it half-and-half (you each cover half its
+          price), and a third time to hand it back to {F}. The colored edge
+          shows whose it is; tax and tip divide themselves in proportion to
+          what each of you took.
         </div>
       </div>
 

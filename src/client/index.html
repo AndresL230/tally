@@ -34,6 +34,12 @@
       a { color: #2c2823; }
       a:hover { color: #000; }
       input[type=range] { accent-color: #2c2823; }
+      .navlink:hover { background: rgba(0,0,0,.05); color: #4a453d; }
+      /* Date inputs: strip the native chrome so their underline sits at the
+         same height as the text inputs beside them (mobile Safari/Chrome
+         otherwise add intrinsic padding that mis-aligns the row). */
+      input[type=date] { appearance: none; -webkit-appearance: none; border-radius: 0; }
+      input[type=date]::-webkit-date-and-time-value { text-align: left; margin: 0; }
       /* Paper-toned scrollbars (the native ones clash on desktop). The
          standard properties cover Firefox and Chrome 121+; the -webkit rules
          cover older Chromium/Safari, which ignore the standard ones. */

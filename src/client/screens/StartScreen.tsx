@@ -46,7 +46,17 @@ export function StartScreen({ colors: C, accent, onPickAccent, busy, onSave, ini
         {onCancel && (
           <button
             onClick={onCancel}
-            style={{ border: 0, background: "transparent", padding: 0, font: `500 14px ${ARCHIVO}`, color: MUTED_3, cursor: "pointer" }}
+            className="navlink"
+            style={{
+              border: 0,
+              background: "transparent",
+              padding: "9px 13px",
+              margin: "-9px -13px",
+              borderRadius: 10,
+              font: `500 14px ${ARCHIVO}`,
+              color: MUTED_3,
+              cursor: "pointer",
+            }}
           >
             ‹ Back
           </button>

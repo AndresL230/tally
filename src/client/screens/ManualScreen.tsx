@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BackLink } from "../components/BackLink";
 import type { CSSProperties } from "react";
 import { divRoundHalfUp, percentShare } from "../../shared/money";
 import { moneyAbs, parseDollarsToCents } from "../../shared/format";
@@ -110,12 +111,7 @@ export function ManualScreen({
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px 22px 20px" }}>
-        <button
-          onClick={onCancel}
-          style={{ border: 0, background: "transparent", padding: 0, font: `500 14px ${ARCHIVO}`, color: MUTED_3, cursor: "pointer" }}
-        >
-          Cancel
-        </button>
+        <BackLink onClick={onCancel}>Cancel</BackLink>
 
         <div style={{ marginTop: 18, borderLeft: `3px solid ${C.me}`, paddingLeft: 14 }}>
           {reason === "photofail" ? (
@@ -176,6 +172,7 @@ export function ManualScreen({
                 onChange={(e) => setDate(e.target.value)}
                 style={{
                   width: "100%",
+                  height: 34,
                   border: 0,
                   borderBottom: "1px solid rgba(0,0,0,.18)",
                   paddingBottom: 7,
@@ -196,6 +193,7 @@ export function ManualScreen({
                 }}
                 style={{
                   width: "100%",
+                  height: 34,
                   border: 0,
                   borderBottom: "1px solid rgba(0,0,0,.18)",
                   paddingBottom: 7,

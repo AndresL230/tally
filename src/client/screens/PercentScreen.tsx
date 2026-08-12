@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BackLink } from "../components/BackLink";
 import { percentShare } from "../../shared/money";
 import { longDate, moneyAbs } from "../../shared/format";
 import { ARCHIVO, MONO, MUTED_1, MUTED_3, SERIF, type Colors } from "../theme";
@@ -51,12 +52,7 @@ export function PercentScreen({
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px 22px 20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <button
-            onClick={onCancel}
-            style={{ border: 0, background: "transparent", padding: 0, font: `500 14px ${ARCHIVO}`, color: MUTED_3, cursor: "pointer" }}
-          >
-            Cancel
-          </button>
+          <BackLink onClick={onCancel}>Cancel</BackLink>
           <span style={{ font: `600 10px ${ARCHIVO}`, letterSpacing: ".16em", textTransform: "uppercase", color: MUTED_3 }}>
             Check the receipt
           </span>

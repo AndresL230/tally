@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext } from "./env";
-import { requireUser } from "./auth";
+import { getUser, requireUser } from "./auth";
 import { ledgerDetail, ledgerForMember, listLedgers } from "./db";
 import { registerMutations } from "./mutations";
 import { registerReceipts } from "./receipts";
@@ -34,6 +34,23 @@ app.get("/api/ledgers/:id", async (c) => {
   const ledger = await ledgerForMember(c.env.DB, c.req.param("id"), email);
   if (!ledger) return c.json({ error: "not found" }, 404);
   return c.json(await ledgerDetail(c.env.DB, ledger, email));
+});
+
+// The root has two faces: a signed-in browser (Access cookie, verified for
+// real — or the localhost dev bypass) gets the app shell; everyone else gets
+// the public landing page. The app's URL never changes.
+app.get("/", async (c) => {
+  const user = await getUser(c.req.raw, c.env);
+  const url = new URL(user ? "/" : "/welcome", c.req.url);
+  return c.env.ASSETS.fetch(new Request(url));
+});
+
+// Cloudflare Access fronts /login, so any request reaching the Worker here
+// has just authenticated — bounce it into the app (same-origin paths only).
+app.get("/login", (c) => {
+  const next = c.req.query("next") ?? "/";
+  const dest = next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  return c.redirect(dest, 302);
 });
 
 app.notFound((c) => {

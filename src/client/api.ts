@@ -68,14 +68,14 @@ export class ApiError extends Error {
   }
 }
 
-/** Reload so Cloudflare Access can host its login again — but never in a
- *  loop: at most once per 15s, else surface the error instead. */
+/** Navigate to /login (Access hosts the PIN there and bounces back into the
+ *  app) — but never in a loop: at most once per 15s, else surface the error. */
 function reloadForLogin(): never {
   const KEY = "tally:last-auth-reload";
   const last = Number(sessionStorage.getItem(KEY) ?? 0);
   if (Date.now() - last > 15_000) {
     sessionStorage.setItem(KEY, String(Date.now()));
-    window.location.reload();
+    window.location.assign("/login");
   }
   throw new ApiError(401, "session expired");
 }

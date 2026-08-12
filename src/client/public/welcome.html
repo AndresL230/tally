@@ -52,7 +52,7 @@
         </svg>
         <span class="serif" style="font-size: 26px">Tally</span>
       </div>
-      <a class="btn-dark" href="/">Sign in</a>
+      <a class="btn-dark" href="/login" data-cta="header">Sign in</a>
     </header>
 
     <section class="wrap hero" style="padding-top: 44px; padding-bottom: 80px; display: flex; gap: 64px; align-items: center; flex-wrap: wrap">
@@ -65,7 +65,7 @@
           suits you — a few weeks of dinners becomes one payment.
         </p>
         <div style="margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center">
-          <a class="btn-accent" href="/">Open your ledger</a>
+          <a class="btn-accent" href="/login" data-cta="hero">Open your ledger</a>
           <span class="mono" style="display: inline-flex; align-items: center; font-size: 14px; color: #8a857c">Made for exactly two accounts.</span>
         </div>
       </div>
@@ -172,7 +172,7 @@
         <p style="margin: 16px auto 0; max-width: 420px; font: 400 16px/1.5 Archivo; color: #4a453d">
           Both accounts already exist. Sign in, pick your color, and photograph whatever you just paid for.
         </p>
-        <a class="btn-accent" href="/" style="margin-top: 30px">Open your ledger</a>
+        <a class="btn-accent" href="/login" style="margin-top: 30px" data-cta="bottom">Open your ledger</a>
       </div>
     </section>
 
@@ -182,5 +182,20 @@
         <span class="mono" style="font-size: 13px; color: #a8a298">Runs on Cloudflare Workers.</span>
       </div>
     </footer>
+    <script>
+      // Signed-in visitors (valid Access session) get back-to-the-app CTAs
+      // instead of Sign in. /api sits behind Access: a live session returns
+      // JSON, anything else surfaces as a redirect or non-JSON.
+      fetch("/api/me", { redirect: "manual" })
+        .then((r) => {
+          if (!r.ok || !(r.headers.get("content-type") || "").includes("json")) return;
+          const label = { header: "Open the app", hero: "Back to your ledger", bottom: "Back to your ledger" };
+          document.querySelectorAll("[data-cta]").forEach((a) => {
+            a.href = "/";
+            a.textContent = label[a.dataset.cta] || "Open the app";
+          });
+        })
+        .catch(() => {});
+    </script>
   </body>
 </html>

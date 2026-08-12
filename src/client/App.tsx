@@ -288,11 +288,10 @@ export default function App() {
     setEditingPrefs(true);
   };
 
-  // Logo/wordmark click: abandon any in-flight flow presentation (the
-  // receipt itself survives server-side) and land on the main view.
+  // Logo/wordmark click: to the landing page (which greets a signed-in
+  // visitor with a back-to-the-app CTA instead of Sign in).
   const goHome = () => {
-    setFlow(null);
-    nav({ name: "ledger" });
+    window.location.assign("/welcome");
   };
 
   const phonePicker = (

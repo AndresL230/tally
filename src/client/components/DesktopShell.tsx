@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import type { LedgerSummary } from "../../shared/types";
 import { ARCHIVO, MONO, MUTED_1, MUTED_3, SERIF, type Colors } from "../theme";
 import { LedgerRows, NewLedgerControl } from "./LedgerNav";
+import { TallyMark } from "./TallyMark";
 
 const BREAKPOINT = "(min-width: 900px)";
 
@@ -37,10 +38,12 @@ export interface DesktopShellProps {
   /** Dim + disable the rail while a full-screen state (onboarding, prefs
    *  editing) owns the pane. */
   railInert?: boolean;
+  /** Logo + wordmark click: back to the main (ledger) view. */
+  onHome?: () => void;
   children: React.ReactNode;
 }
 
-export function DesktopShell({ accent, rail, railInert, children }: DesktopShellProps) {
+export function DesktopShell({ accent, rail, railInert, onHome, children }: DesktopShellProps) {
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
       <div
@@ -53,7 +56,23 @@ export function DesktopShell({ accent, rail, railInert, children }: DesktopShell
           borderBottom: "1px solid rgba(0,0,0,.08)",
         }}
       >
-        <span style={{ letterSpacing: ".08em", color: accent, font: `600 12px ${MONO}` }}>Tally</span>
+        <button
+          onClick={onHome}
+          className="navlink"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            border: 0,
+            background: "transparent",
+            padding: "6px 12px",
+            borderRadius: 10,
+            cursor: onHome ? "pointer" : "default",
+          }}
+        >
+          <TallyMark height={15} accent={accent} />
+          <span style={{ letterSpacing: ".08em", color: accent, font: `600 12px ${MONO}` }}>Tally</span>
+        </button>
       </div>
       <div style={{ flex: 1, minHeight: 0, display: "flex", justifyContent: "center" }}>
         <div style={{ width: "100%", maxWidth: 1060, display: "flex", minHeight: 0 }}>
@@ -128,7 +147,7 @@ export function DesktopShell({ accent, rail, railInert, children }: DesktopShell
                 minHeight: 0,
                 display: "flex",
                 flexDirection: "column",
-                padding: "0 12px",
+                padding: "18px 12px 0",
               }}
             >
               {children}
@@ -141,10 +160,13 @@ export function DesktopShell({ accent, rail, railInert, children }: DesktopShell
 }
 
 /** The right pane when no ledger is open yet. */
-export function PaneEmptyState({ hasLedgers }: { hasLedgers: boolean }) {
+export function PaneEmptyState({ hasLedgers, accent }: { hasLedgers: boolean; accent: string }) {
   return (
     <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ textAlign: "center", paddingBottom: 60 }}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
+          <TallyMark height={34} accent={accent} />
+        </div>
         <div style={{ fontFamily: SERIF, fontSize: 30, lineHeight: 1.2 }}>
           {hasLedgers ? "Pick a ledger." : "Start a ledger with a friend's email."}
         </div>

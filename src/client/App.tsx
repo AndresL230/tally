@@ -7,6 +7,7 @@ import { ARCHIVO, DEFAULT_ACCENT, MONO, SERIF, colorsFor, type Colors } from "./
 import { LedgerScreen } from "./screens/LedgerScreen";
 import { PickerScreen } from "./screens/PickerScreen";
 import { DesktopShell, PaneEmptyState, useIsDesktop, type DesktopRailProps } from "./components/DesktopShell";
+import { TallyMark } from "./components/TallyMark";
 import { StartScreen } from "./screens/StartScreen";
 import { ManualScreen, type ManualCommit } from "./screens/ManualScreen";
 import { SettleScreen } from "./screens/SettleScreen";
@@ -287,8 +288,15 @@ export default function App() {
     setEditingPrefs(true);
   };
 
+  // Logo/wordmark click: abandon any in-flight flow presentation (the
+  // receipt itself survives server-side) and land on the main view.
+  const goHome = () => {
+    setFlow(null);
+    nav({ name: "ledger" });
+  };
+
   const phonePicker = (
-    <Shell accent={colors.me}>
+    <Shell accent={colors.me} onHome={goHome}>
       {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
       <PickerScreen
         ledgers={ledgers}
@@ -306,9 +314,9 @@ export default function App() {
   if (!detail) {
     // Desktop: the rail IS the picker; the pane gets a quiet empty state.
     return isDesktop ? (
-      <DesktopShell accent={colors.me} rail={{ ...railFor(colors), onEditPrefs: startPrefsEdit }}>
+      <DesktopShell accent={colors.me} rail={{ ...railFor(colors), onEditPrefs: startPrefsEdit }} onHome={goHome}>
         {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
-        <PaneEmptyState hasLedgers={ledgers.length > 0} />
+        <PaneEmptyState hasLedgers={ledgers.length > 0} accent={colors.me} />
       </DesktopShell>
     ) : (
       phonePicker
@@ -791,7 +799,7 @@ export default function App() {
   if (isDesktop) {
     const canDrop = screen.name === "ledger";
     return (
-      <DesktopShell accent={colors.me} rail={{ ...railFor(colors), onEditPrefs: startPrefsEdit }}>
+      <DesktopShell accent={colors.me} rail={{ ...railFor(colors), onEditPrefs: startPrefsEdit }} onHome={goHome}>
         {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
         <div
           key={screenKey}
@@ -847,7 +855,7 @@ export default function App() {
   }
 
   return (
-    <Shell accent={colors.me}>
+    <Shell accent={colors.me} onHome={goHome}>
       {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
       <div
         key={screenKey}
@@ -877,7 +885,15 @@ function FlashNote({ accent, children }: { accent: string; children: React.React
   );
 }
 
-function Shell({ accent, children }: { accent: string | null; children: React.ReactNode }) {
+function Shell({
+  accent,
+  onHome,
+  children,
+}: {
+  accent: string | null;
+  onHome?: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <div style={{ height: "100%", display: "flex", justifyContent: "center" }}>
       <div style={{ width: "100%", maxWidth: 410, height: "100%", display: "flex", flexDirection: "column" }}>
@@ -891,9 +907,25 @@ function Shell({ accent, children }: { accent: string | null; children: React.Re
             font: `500 12px ${MONO}`,
           }}
         >
-          <span style={{ letterSpacing: ".08em", color: accent ?? "#211f1c", font: `600 12px ${MONO}` }}>
-            Tally
-          </span>
+          <button
+            onClick={onHome}
+            className="navlink"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              border: 0,
+              background: "transparent",
+              padding: "6px 12px",
+              borderRadius: 10,
+              cursor: onHome ? "pointer" : "default",
+            }}
+          >
+            <TallyMark height={15} accent={accent ?? "#211f1c"} />
+            <span style={{ letterSpacing: ".08em", color: accent ?? "#211f1c", font: `600 12px ${MONO}` }}>
+              Tally
+            </span>
+          </button>
         </div>
         {children}
       </div>

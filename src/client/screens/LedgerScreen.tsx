@@ -82,13 +82,13 @@ export function LedgerScreen({
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div style={{ padding: "14px 22px 20px", flex: "none" }}>
-        {onBackToPicker && (
-          <div style={{ marginBottom: 16 }}>
-            <BackLink onClick={onBackToPicker}>‹ Ledgers</BackLink>
+        {/* One row: the ledger label left, the back link right — stacking
+            them wasted a whole row of the phone screen. */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ font: `600 10px ${ARCHIVO}`, letterSpacing: ".16em", textTransform: "uppercase", color: MUTED_3 }}>
+            You and {F}
           </div>
-        )}
-        <div style={{ font: `600 10px ${ARCHIVO}`, letterSpacing: ".16em", textTransform: "uppercase", color: MUTED_3 }}>
-          You and {F}
+          {onBackToPicker && <BackLink onClick={onBackToPicker}>‹ Ledgers</BackLink>}
         </div>
 
         {open ? (

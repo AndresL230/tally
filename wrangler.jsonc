@@ -30,8 +30,8 @@
     // The Access application AUD tag (Zero Trust → Access → Applications → your app → Overview)
     "ACCESS_AUD": "REPLACE-ME",
     // Cloudflare account id + AI Gateway id for Anthropic extraction calls (M2)
-    "AI_GATEWAY_ACCOUNT_ID": "REPLACE-ME",
-    "AI_GATEWAY_ID": "REPLACE-ME"
+    "AI_GATEWAY_ACCOUNT_ID": "0bda3a2560ca48711ef7336cc421abed",
+    "AI_GATEWAY_ID": "tally"
   }
   // Secrets (never in this file): ANTHROPIC_API_KEY via `wrangler secret put ANTHROPIC_API_KEY`
 }

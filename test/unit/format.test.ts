@@ -41,9 +41,18 @@ describe("cents display formatting", () => {
   });
 
   it("formats dates without Date-object timezone hazards", () => {
-    expect(shortDate("2026-08-06")).toBe("Aug 6");
-    expect(shortDate("2026-01-01")).toBe("Jan 1");
+    expect(shortDate("2026-08-06", 2026)).toBe("Aug 6");
+    expect(shortDate("2026-01-01", 2026)).toBe("Jan 1");
     expect(longDate("2026-12-31")).toBe("Dec 31, 2026");
+  });
+
+  it("shortDate carries the year for dates outside the current year", () => {
+    expect(shortDate("2025-12-28", 2026)).toBe("Dec 28, 2025");
+    expect(shortDate("2027-01-02", 2026)).toBe("Jan 2, 2027");
+    // Defaults to the real current year when none is given.
+    const thisYear = new Date().getFullYear();
+    expect(shortDate(`${thisYear}-08-06`)).toBe("Aug 6");
+    expect(shortDate(`${thisYear - 1}-08-06`)).toBe(`Aug 6, ${thisYear - 1}`);
   });
 });
 

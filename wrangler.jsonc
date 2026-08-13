@@ -4,6 +4,15 @@
   "name": "tally",
   "main": "src/worker/index.ts",
   "compatibility_date": "2025-06-01",
+  // The client bundle is an ASSET, not part of the Worker's module graph, so
+  // nothing else forces it to exist: `wrangler deploy` / `versions upload`
+  // fail on a missing assets.directory unless something built it first.
+  // Owning that here means every path builds it — the production deploy, a
+  // PR's `versions upload` preview (which runs no build command of its own),
+  // and `wrangler dev`, which otherwise serves a stale dist/client.
+  "build": {
+    "command": "npm run build"
+  },
   "assets": {
     "directory": "dist/client",
     "binding": "ASSETS",

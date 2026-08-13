@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
 import type { ApiEntry, LedgerDetail } from "../../shared/types";
 import { viewerDelta } from "../../shared/ledger";
 import { chainDepth, isVoided as chainVoided, voidChain } from "../../shared/voids";
-import { moneyAbs, moneySigned, runningLabel, shortDate } from "../../shared/format";
+import { longDate, moneyAbs, moneySigned, runningLabel } from "../../shared/format";
 import { ARCHIVO, INK, MONO, MUTED_2, MUTED_3, MUTED_4, MUTED_5, MUTED_6, PAPER, SERIF, type Colors } from "../theme";
 
 const NUM_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
@@ -59,7 +59,7 @@ export function LedgerScreen({
       (e) => e.kind === "expense" && !e.expense?.reverses_id && !chainVoided(e.id, chain),
     ).length;
     const payments = entries.filter((e) => e.kind === "settlement").length;
-    const since = shortDate(entries[entries.length - 1]!.occurred_on);
+    const since = longDate(entries[entries.length - 1]!.occurred_on);
     return `Square since ${since}. ${capitalize(numWord(receipts))} receipt${receipts === 1 ? "" : "s"}, ${numWord(payments)} payment${payments === 1 ? "" : "s"}.`;
   })();
 
@@ -81,7 +81,9 @@ export function LedgerScreen({
         ? e.settlement?.from_email === viewer
           ? `you paid ${F}`
           : `${F} paid you`
-        : `${shortDate(e.occurred_on)} · ${e.expense?.payer === viewer ? "you paid" : `${F} paid`}`;
+        : // The full date, year included: a ledger spanning years reads
+          // ambiguously when every row says only "Aug 21".
+          `${longDate(e.occurred_on)} · ${e.expense?.payer === viewer ? "you paid" : `${F} paid`}`;
       return { e, dv, run, pos, isPay, isVoidRow, undoesAVoid, isVoided, sub };
     })
     .reverse();

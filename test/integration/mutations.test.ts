@@ -759,3 +759,188 @@ describe("POST /api/ledgers/:id/expenses/:expenseId/void — reversal semantics"
     expect(await countRows("expenses")).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Payer amendment — the ledger's one in-place edit
+// ---------------------------------------------------------------------------
+
+describe("POST /api/ledgers/:id/expenses/:expenseId/payer — swapping who paid", () => {
+  /** Post a receipt-backed items expense; returns its id. */
+  async function postItemsExpense(items: { label: string; price_cents: number; assigned_to: string }[], total: number) {
+    const receiptId = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO receipts (id, ledger_id, sha256, status, created_at) VALUES (?1, ?2, ?3, 'needs_review', ?4)",
+    )
+      .bind(receiptId, ledgerId, crypto.randomUUID(), Date.now())
+      .run();
+    const body = {
+      id: crypto.randomUUID(),
+      occurred_on: "2026-08-01",
+      merchant: "Xian Famous Foods",
+      total_cents: total,
+      payer: ALEX,
+      method: "items",
+      receipt_id: receiptId,
+      items,
+    };
+    const res = await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body);
+    expect(res.status).toBe(201);
+    return body.id;
+  }
+
+  it("items entry: recomputes the share from the stored items, not by negating the delta", async () => {
+    // The real Xian receipt: two burgers ALEX's, one burger + lamb JORDAN's,
+    // $26.70 of items under a $29.07 total, so $2.37 of extra is split in
+    // proportion — and each side's extra share is rounded independently.
+    const id = await postItemsExpense(
+      [
+        { label: "Stewed Pork Burger", price_cents: 625, assigned_to: ALEX },
+        { label: "Stewed Pork Burger", price_cents: 625, assigned_to: ALEX },
+        { label: "Stewed Pork Burger", price_cents: 625, assigned_to: JORDAN },
+        { label: "Spicy Cumin Lamb Burger", price_cents: 795, assigned_to: JORDAN },
+      ],
+      2907,
+    );
+    const before = await getDetail(ledgerId, ALEX);
+    const original = before.entries.find((e) => e.id === id)!;
+    expect(original.expense?.other_share_cents).toBe(1546); // JORDAN's share
+    expect(original.delta_cents).toBe(1546); // ALEX paid, ALEX is person_a
+
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${id}/payer`, ALEX, { payer: JORDAN });
+    expect(res.status).toBe(200);
+    const entry = await entryOf(res);
+    expect(entry.expense?.payer).toBe(JORDAN);
+    // ALEX's share, recomputed from the items — NOT 2907-1546 by luck alone.
+    expect(entry.expense?.other_share_cents).toBe(1361);
+    expect(entry.delta_cents).toBe(-1361); // JORDAN paid -> ALEX owes
+    // The two sides still account for every cent of the total.
+    expect(1546 + 1361).toBe(2907);
+    expect(await countRows("expenses")).toBe(1); // in place: no new rows
+  });
+
+  it("percent/manual entry: the non-payer's share becomes the remainder", async () => {
+    const body = expenseBody({ payer: ALEX, total_cents: 1000, other_share_cents: 700 });
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/payer`, JORDAN, {
+      payer: JORDAN,
+    });
+    expect(res.status).toBe(200);
+    const entry = await entryOf(res);
+    expect(entry.expense?.other_share_cents).toBe(300); // 1000 - 700
+    expect(entry.delta_cents).toBe(-300);
+  });
+
+  it("stamps amended_at/amended_by with the caller, and repeating the same target is a no-op", async () => {
+    const body = expenseBody({ payer: ALEX, other_share_cents: 700 });
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+
+    const first = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/payer`, JORDAN, {
+      payer: JORDAN,
+    });
+    expect(first.status).toBe(200);
+    const stamped = await entryOf(first);
+    expect(stamped.expense?.amended_by).toBe(JORDAN); // the caller, not the payer
+    expect(stamped.expense?.amended_at).toBeGreaterThan(0);
+
+    // Idempotent: naming the payer it already has must not flip it back.
+    const repeat = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/payer`, JORDAN, {
+      payer: JORDAN,
+    });
+    expect(repeat.status).toBe(200);
+    const again = await entryOf(repeat);
+    expect(again.expense?.payer).toBe(JORDAN);
+    expect(again.expense?.other_share_cents).toBe(300);
+    expect(again.delta_cents).toBe(-300);
+  });
+
+  it("swapping back restores the original numbers exactly", async () => {
+    const body = expenseBody({ payer: ALEX, total_cents: 1000, other_share_cents: 700 });
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+    await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/payer`, ALEX, { payer: JORDAN });
+    const back = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/payer`, ALEX, {
+      payer: ALEX,
+    });
+    expect(back.status).toBe(200);
+    const entry = await entryOf(back);
+    expect(entry.expense?.payer).toBe(ALEX);
+    expect(entry.expense?.other_share_cents).toBe(700);
+    expect(entry.delta_cents).toBe(700);
+  });
+
+  it("refuses a void row => 409, nothing changed", async () => {
+    const body = expenseBody();
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+    const voidBody = { id: crypto.randomUUID(), occurred_on: "2026-08-03" };
+    expect(
+      (await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/void`, ALEX, voidBody)).status,
+    ).toBe(201);
+
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${voidBody.id}/payer`, ALEX, {
+      payer: JORDAN,
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as ErrorResponse).error).toBe("cannot change the payer of a void");
+  });
+
+  it("refuses a currently-voided entry => 409, but allows it again once unvoided", async () => {
+    const body = expenseBody({ payer: ALEX, other_share_cents: 700 });
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+    const voidBody = { id: crypto.randomUUID(), occurred_on: "2026-08-03" };
+    expect(
+      (await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/void`, ALEX, voidBody)).status,
+    ).toBe(201);
+
+    const blocked = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/payer`, ALEX, {
+      payer: JORDAN,
+    });
+    expect(blocked.status).toBe(409);
+    expect(((await blocked.json()) as ErrorResponse).error).toBe("entry is voided");
+
+    // Unvoid it, and the swap is allowed again.
+    expect(
+      (
+        await post(`/api/ledgers/${ledgerId}/expenses/${voidBody.id}/void`, ALEX, {
+          id: crypto.randomUUID(),
+          occurred_on: "2026-08-04",
+        })
+      ).status,
+    ).toBe(201);
+    const allowed = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/payer`, ALEX, {
+      payer: JORDAN,
+    });
+    expect(allowed.status).toBe(200);
+  });
+
+  it("rejects a payer who is not a ledger member => 400", async () => {
+    const body = expenseBody();
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/payer`, ALEX, {
+      payer: OUTSIDER,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("non-member caller => 404, and the payer is untouched", async () => {
+    const body = expenseBody({ payer: ALEX, other_share_cents: 700 });
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/payer`, OUTSIDER, {
+      payer: JORDAN,
+    });
+    expect(res.status).toBe(404);
+    const row = await env.DB.prepare("SELECT payer FROM expenses WHERE id = ?1")
+      .bind(body["id"])
+      .first<{ payer: string }>();
+    expect(row?.payer).toBe(ALEX);
+  });
+
+  it("an expense in another ledger => 404, even for a member of both", async () => {
+    const otherLedger = await insertLedger(ALEX, SAM);
+    const foreign = expenseBody({ payer: ALEX, other_share_cents: 100 });
+    expect((await post(`/api/ledgers/${otherLedger}/expenses`, ALEX, foreign)).status).toBe(201);
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${foreign["id"]}/payer`, ALEX, {
+      payer: JORDAN,
+    });
+    expect(res.status).toBe(404);
+  });
+});

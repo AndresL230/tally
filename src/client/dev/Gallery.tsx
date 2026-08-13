@@ -97,6 +97,7 @@ function detailState(id: string, label: string, d: LedgerDetail, entryId: string
         friendName={F}
         onBack={log("detail back")}
         onVoid={log("void entry")}
+        onSetPayer={log("set payer")}
       />
     ),
   };

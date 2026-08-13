@@ -73,6 +73,8 @@ interface ExpenseRow {
   created_at: number;
   reverses_id: string | null;
   reversed_by: string | null;
+  amended_at: number | null;
+  amended_by: string | null;
 }
 
 interface SettlementRow {
@@ -166,6 +168,8 @@ export async function ledgerDetail(
           created_by: e.created_by,
           reverses_id: e.reverses_id,
           reversed_by: e.reversed_by,
+          amended_at: e.amended_at,
+          amended_by: e.amended_by,
           items: e.receipt_id ? (itemsByReceipt.get(e.receipt_id) ?? null) : null,
         },
       };

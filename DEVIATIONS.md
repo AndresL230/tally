@@ -151,3 +151,36 @@ the presence of reversed_by — resolved once in shared/voids.ts and used by
 the detail screen, the ledger rows, and the settled-summary receipt count.
 Reversal rows carry note 'Void' or 'Unvoid' so the ledger reads honestly, at
 the cost of three visible rows for one net entry.
+
+## D14. Swapping who paid edits the row in place — the ledger's one exception
+
+Everything else in this schema appends; this does not. Recording the wrong
+payer was unfixable in the app (it took hand-written SQL against production
+twice), and the append-only correction — void the entry, repost it — costs
+two extra ledger rows every time, which is exactly the noise voids were
+already generating. So `POST /expenses/:id/payer` updates `payer` and
+`other_share_cents` on the existing row. The row is not silent about it:
+migration 0002 adds nullable `amended_at`/`amended_by`, stamped with the
+CALLER (not the new payer), and the detail screen prints "Payer changed by
+you on Aug 13, 2026" so the other member can see the entry was edited.
+
+The body names the TARGET payer rather than requesting a "swap", so a retry
+is a no-op instead of flipping twice; naming the payer a row already has
+writes nothing and stamps nothing.
+
+`other_share_cents` is the NON-payer's share, so flipping the payer changes
+whose share the number describes. For percent/manual that is the remainder.
+For items the server recomputes through `splitItems` from the stored
+assignments rather than subtracting, because each side's cut of the extra is
+rounded independently and subtraction is not guaranteed to agree. Consequence
+worth knowing: shares stay attached to PEOPLE, not to sides. Flipping an
+entry where the payer also had the entire share yields a zero-delta row (you
+paid for your own thing, nobody owes anybody) — correct, and the detail
+screen now says "didn't move the balance" instead of rendering "−$0.00" next
+to the words "you owed".
+
+Refused: voids (`cannot change the payer of a void`) and currently-voided
+entries (`entry is voided` — unvoid it first, since editing one would change
+what the eventual unvoid restores). Both use the same chain-parity rule as
+D13. Migration 0002 must be applied by hand (`wrangler d1 migrations apply
+tally --remote`); CI does not run migrations.

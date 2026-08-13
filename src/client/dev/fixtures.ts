@@ -89,6 +89,8 @@ function itemsExpense(
       created_by: payer,
       reverses_id: null,
       reversed_by: flags?.reversed_by ?? null,
+      amended_at: null,
+      amended_by: null,
       items: apiItems(items),
     },
   };
@@ -125,6 +127,8 @@ function flatExpense(
       created_by: payer,
       reverses_id: null,
       reversed_by: null,
+      amended_at: null,
+      amended_by: null,
       items: null,
     },
   };

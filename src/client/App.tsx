@@ -592,6 +592,19 @@ export default function App() {
     }
   };
 
+  const commitPayer = async (entryId: string, payer: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.setPayer(detail.ledger.id, entryId, payer);
+      await afterMutation();
+    } catch (err) {
+      setFlash(describeError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   /** Voids `targetId`. Unvoiding is the same call aimed at the live
    *  reversal: the ledger is append-only, so undo appends a third row. */
   const commitVoid = async (targetId: string) => {
@@ -743,6 +756,7 @@ export default function App() {
           friendName={friendName}
           onBack={() => nav({ name: "ledger" })}
           onVoid={commitVoid}
+          onSetPayer={commitPayer}
         />
       );
       break;

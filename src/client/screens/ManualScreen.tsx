@@ -2,6 +2,7 @@ import { useState } from "react";
 import { BackLink } from "../components/BackLink";
 import type { CSSProperties } from "react";
 import { divRoundHalfUp, percentShare } from "../../shared/money";
+import { expenseEffect } from "../../shared/ledger";
 import { moneyAbs, parseDollarsToCents } from "../../shared/format";
 import { ARCHIVO, MONO, MUTED_1, MUTED_3, SERIF, type Colors } from "../theme";
 import { PercentControl } from "../components/PercentControl";
@@ -93,12 +94,20 @@ export function ManualScreen({
     color: active ? "#fff" : "#6f6a61",
   });
 
+  // The posted other_share is the NON-PAYER's share (contract):
+  // viewer pays -> the friend is the other; friend pays -> the viewer is.
+  const otherShareOf = (total: number) => {
+    const friendShare = percentShare(total, pct);
+    return payer === "me" ? friendShare : total - friendShare;
+  };
+  // "Who paid" and "the friend's percent" have to be read TOGETHER to know
+  // who ends up owing whom, and the pairing that moves nothing (you paid,
+  // 0% theirs) is one tap away. State the outcome before it is committed.
+  const effect = expenseEffect(otherShareOf(totalCents ?? 0), payer === "me");
+
   const commit = () => {
     if (!valid || totalCents === null) return;
-    const friendShare = percentShare(totalCents, pct);
-    // The posted other_share is the NON-PAYER's share (contract):
-    // viewer pays -> the friend is the other; friend pays -> the viewer is.
-    const otherShare = payer === "me" ? friendShare : totalCents - friendShare;
+    const otherShare = otherShareOf(totalCents);
     onCommit({
       merchant: merchant.trim(),
       occurred_on: date,
@@ -249,6 +258,23 @@ export function ManualScreen({
         </div>
       </div>
       <div style={{ flex: "none", padding: "12px 18px 20px", borderTop: "1px solid rgba(0,0,0,.1)" }}>
+        {totalCents !== null && (
+          <div style={{ font: `500 15px ${ARCHIVO}`, color: MUTED_1, marginBottom: 10 }}>
+            {effect.kind === "none" ? (
+              <span style={{ color: C.deep }}>
+                This won't move the balance — nobody ends up owing anybody.
+              </span>
+            ) : (
+              <>
+                {effect.kind === "friend_owes_viewer" ? `${F} will owe you` : `You'll owe ${F}`}{" "}
+                <span style={{ fontFamily: SERIF, fontSize: 26, verticalAlign: -3, margin: "0 4px" }}>
+                  {moneyAbs(effect.cents)}
+                </span>
+                of {moneyAbs(totalCents)}
+              </>
+            )}
+          </div>
+        )}
         <button
           onClick={commit}
           style={{

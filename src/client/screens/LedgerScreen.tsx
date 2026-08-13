@@ -3,7 +3,8 @@ import { BackLink } from "../components/BackLink";
 import type { CSSProperties } from "react";
 import type { ApiEntry, LedgerDetail } from "../../shared/types";
 import { viewerDelta } from "../../shared/ledger";
-import { moneyAbs, moneySigned, runningLabel, shortDate } from "../../shared/format";
+import { chainDepth, isVoided as chainVoided, voidChain } from "../../shared/voids";
+import { longDate, moneyAbs, moneySigned, runningLabel } from "../../shared/format";
 import { ARCHIVO, INK, MONO, MUTED_2, MUTED_3, MUTED_4, MUTED_5, MUTED_6, PAPER, SERIF, type Colors } from "../theme";
 
 const NUM_WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
@@ -48,15 +49,17 @@ export function LedgerScreen({
   const open = balance !== 0;
   const owedByFriend = balance > 0;
 
+  const chain = voidChain(entries);
+
   const settledLine = (() => {
     if (!entries.length) return "Nothing owed either way.";
     // Voided pairs (original + reversal) net to nothing — don't count them
-    // as receipts in the settled summary.
+    // as receipts in the settled summary. An unvoided entry counts again.
     const receipts = entries.filter(
-      (e) => e.kind === "expense" && !e.expense?.reverses_id && !e.expense?.reversed_by,
+      (e) => e.kind === "expense" && !e.expense?.reverses_id && !chainVoided(e.id, chain),
     ).length;
     const payments = entries.filter((e) => e.kind === "settlement").length;
-    const since = shortDate(entries[entries.length - 1]!.occurred_on);
+    const since = longDate(entries[entries.length - 1]!.occurred_on);
     return `Square since ${since}. ${capitalize(numWord(receipts))} receipt${receipts === 1 ? "" : "s"}, ${numWord(payments)} payment${payments === 1 ? "" : "s"}.`;
   })();
 
@@ -67,15 +70,21 @@ export function LedgerScreen({
       const pos = dv > 0;
       const isPay = e.kind === "settlement";
       // Reversal expenses render italic + muted like settle rows; the
-      // voided originals keep their layout at reduced opacity.
+      // voided originals keep their layout at reduced opacity. An entry that
+      // was voided and then unvoided is live again, so it reads as normal.
       const isVoidRow = !!e.expense?.reverses_id;
-      const isVoided = !!e.expense?.reversed_by;
+      // Even depth puts an entry back, odd takes it away — from the third
+      // row on, both kinds reverse a reversal, so parity is the only tell.
+      const undoesAVoid = isVoidRow && chainDepth(e.id, chain) % 2 === 0;
+      const isVoided = e.kind === "expense" && chainVoided(e.id, chain);
       const sub = isPay
         ? e.settlement?.from_email === viewer
           ? `you paid ${F}`
           : `${F} paid you`
-        : `${shortDate(e.occurred_on)} · ${e.expense?.payer === viewer ? "you paid" : `${F} paid`}`;
-      return { e, dv, run, pos, isPay, isVoidRow, isVoided, sub };
+        : // The full date, year included: a ledger spanning years reads
+          // ambiguously when every row says only "Aug 21".
+          `${longDate(e.occurred_on)} · ${e.expense?.payer === viewer ? "you paid" : `${F} paid`}`;
+      return { e, dv, run, pos, isPay, isVoidRow, undoesAVoid, isVoided, sub };
     })
     .reverse();
 
@@ -124,7 +133,7 @@ export function LedgerScreen({
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto", borderTop: "1px solid rgba(0,0,0,.09)" }}>
         {entries.length ? (
           <div>
-            {rows.map(({ e, dv, run, pos, isPay, isVoidRow, isVoided, sub }) => (
+            {rows.map(({ e, dv, run, pos, isPay, isVoidRow, undoesAVoid, isVoided, sub }) => (
               <button
                 key={e.id}
                 onClick={onOpenEntry ? () => onOpenEntry(e) : undefined}
@@ -164,7 +173,11 @@ export function LedgerScreen({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {isPay ? "Settle up" : isVoidRow ? `Void — ${e.expense?.merchant}` : e.expense?.merchant}
+                    {isPay
+                      ? "Settle up"
+                      : isVoidRow
+                        ? `${undoesAVoid ? "Unvoid" : "Void"} — ${e.expense?.merchant}`
+                        : e.expense?.merchant}
                   </span>
                 </span>
                 <span

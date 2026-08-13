@@ -3,6 +3,7 @@ import { BackLink } from "../components/BackLink";
 import type { CSSProperties } from "react";
 import type { ApiEntry, LedgerDetail } from "../../shared/types";
 import { otherMember, viewerDelta } from "../../shared/ledger";
+import { chainDepth, chainTip, isVoided as chainVoided, voidChain } from "../../shared/voids";
 import { divRoundHalfUp, splitItems, type SplitResult } from "../../shared/money";
 import { longDate, money, moneyAbs, moneySigned } from "../../shared/format";
 import { ARCHIVO, CARD, INK, MONO, MUTED_1, MUTED_2, MUTED_3, SERIF, halfBg, type Colors } from "../theme";
@@ -19,7 +20,9 @@ export interface DetailScreenProps {
   colors: Colors;
   friendName: string;
   onBack: () => void;
-  onVoid: (entry: ApiEntry) => void;
+  /** Voids the given entry id. Unvoiding is the same call aimed at the live
+   *  reversal — the ledger is append-only, so undo appends, never deletes. */
+  onVoid: (targetId: string) => void;
 }
 
 export function DetailScreen({ entry, detail, colors: C, friendName: F, onBack, onVoid }: DetailScreenProps) {
@@ -31,7 +34,13 @@ export function DetailScreen({ entry, detail, colors: C, friendName: F, onBack, 
   const st = entry.kind === "settlement" ? entry.settlement : undefined;
   const isPay = entry.kind === "settlement";
   const isReversal = !!ex?.reverses_id;
-  const isVoided = !!ex?.reversed_by;
+  // Voided state is the PARITY of the reversal chain: a void that has itself
+  // been voided is an undone void, and the original is live again.
+  const chain = voidChain(detail.entries);
+  const isVoided = !!ex && chainVoided(entry.id, chain);
+  // Even depth = puts an entry back, odd = takes it away. Both reverse a
+  // reversal once the chain is three long, so only the parity separates them.
+  const undoesAVoid = isReversal && chainDepth(entry.id, chain) % 2 === 0;
 
   const dv = viewerDelta(entry.delta_cents, viewer, ledger);
   const pos = dv > 0;
@@ -55,7 +64,9 @@ export function DetailScreen({ entry, detail, colors: C, friendName: F, onBack, 
       ? `You paid ${F} back.`
       : `${F} paid you back.`
     : isReversal
-      ? `Reverses the ${ex?.merchant ?? ""} entry.`
+      ? undoesAVoid
+        ? `Puts the ${ex?.merchant ?? ""} entry back.`
+        : `Reverses the ${ex?.merchant ?? ""} entry.`
       : (ex?.note ?? "No line items recorded.");
   const showNote = isPay || isReversal || !hasItems;
 
@@ -256,22 +267,27 @@ export function DetailScreen({ entry, detail, colors: C, friendName: F, onBack, 
           </div>
         )}
 
-        {/* Void affordance (M1, no mockup design — beat-confirm pattern). */}
+        {/* Void / unvoid affordance (M1, no mockup design — beat-confirm
+            pattern). Unvoid aims the same call at the live reversal. */}
         {ex && !isReversal && (
-          isVoided ? (
-            <div style={{ marginTop: 26, font: `400 14.5px ${ARCHIVO}`, fontStyle: "italic", color: MUTED_3 }}>Voided.</div>
-          ) : (
+          <>
+            {isVoided && (
+              <div style={{ marginTop: 26, font: `400 14.5px ${ARCHIVO}`, fontStyle: "italic", color: MUTED_3 }}>
+                Voided. It isn't counted in the balance.
+              </div>
+            )}
             <button
               onClick={() => {
                 if (!armed) {
                   setArmed(true);
                   return;
                 }
-                onVoid(entry);
+                // Voided: reverse the live reversal. Live: reverse the entry.
+                onVoid(isVoided ? chainTip(entry.id, chain) : entry.id);
               }}
               style={{
                 width: "100%",
-                marginTop: 26,
+                marginTop: isVoided ? 12 : 26,
                 height: 56,
                 borderRadius: 16,
                 border: armed ? 0 : "1px solid rgba(0,0,0,.18)",
@@ -281,9 +297,15 @@ export function DetailScreen({ entry, detail, colors: C, friendName: F, onBack, 
                 cursor: "pointer",
               }}
             >
-              {armed ? "Yes, void it" : "Void this entry"}
+              {isVoided
+                ? armed
+                  ? "Yes, put it back"
+                  : "Unvoid this entry"
+                : armed
+                  ? "Yes, void it"
+                  : "Void this entry"}
             </button>
-          )
+          </>
         )}
       </div>
       <div style={{ flex: "none", padding: "12px 18px 20px", borderTop: "1px solid rgba(0,0,0,.1)" }}>

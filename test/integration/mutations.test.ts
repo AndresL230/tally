@@ -631,7 +631,71 @@ describe("POST /api/ledgers/:id/expenses/:expenseId/void — reversal semantics"
     expect(await countRows("expenses")).toBe(2);
   });
 
-  it("voiding a reversal => 409 with error 'cannot void a void'", async () => {
+  it("unvoid: voiding the reversal restores the original's effect exactly", async () => {
+    // ALEX pays, other_share 700 -> delta +700.
+    const e1 = expenseBody({ other_share_cents: 700 });
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, e1)).status).toBe(201);
+    expect(await balanceOf(ledgerId, ALEX)).toBe(700);
+
+    const voidBody = { id: crypto.randomUUID(), occurred_on: "2026-08-03" };
+    expect(
+      (
+        await post(`/api/ledgers/${ledgerId}/expenses/${e1["id"]}/void`, ALEX, voidBody)
+      ).status,
+    ).toBe(201);
+    expect(await balanceOf(ledgerId, ALEX)).toBe(0);
+
+    // Unvoid = reverse the reversal. Append-only: a third row, not a delete.
+    const unvoidBody = { id: crypto.randomUUID(), occurred_on: "2026-08-04" };
+    const res = await post(
+      `/api/ledgers/${ledgerId}/expenses/${voidBody.id}/void`,
+      JORDAN, // either member may unvoid
+      unvoidBody,
+    );
+    expect(res.status).toBe(201);
+    const unvoid = await entryOf(res);
+    expect(unvoid.expense?.reverses_id).toBe(voidBody.id);
+    expect(unvoid.expense?.other_share_cents).toBe(700); // negation of the -700 void
+    expect(unvoid.delta_cents).toBe(700);
+    expect(await balanceOf(ledgerId, ALEX)).toBe(700); // exactly the pre-void balance
+    expect(await countRows("expenses")).toBe(3);
+
+    // The chain is visible to the client: the void is itself now reversed.
+    const detail = await getDetail(ledgerId, ALEX);
+    const reversal = detail.entries.find((e) => e.id === voidBody.id);
+    expect(reversal?.expense?.reversed_by).toBe(unvoidBody.id);
+    // The original still points at its (now-dead) reversal — live state is
+    // the parity of the chain, not the presence of reversed_by.
+    const original = detail.entries.find((e) => e.id === e1["id"]);
+    expect(original?.expense?.reversed_by).toBe(voidBody.id);
+  });
+
+  it("unvoid then re-void: the balance toggles, each void targets the chain tip", async () => {
+    const e1 = expenseBody({ other_share_cents: 500 });
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, e1)).status).toBe(201);
+
+    let target = e1["id"] as string;
+    // Each row's note names what it DOES, which alternates down the chain —
+    // it is not simply "reverses a reversal" (that would call every row from
+    // the third onward an unvoid).
+    const expected = [
+      { balance: 0, note: "Void" },
+      { balance: 500, note: "Unvoid" },
+      { balance: 0, note: "Void" },
+      { balance: 500, note: "Unvoid" },
+    ];
+    for (const step of expected) {
+      const body = { id: crypto.randomUUID(), occurred_on: "2026-08-05" };
+      const res = await post(`/api/ledgers/${ledgerId}/expenses/${target}/void`, ALEX, body);
+      expect(res.status).toBe(201);
+      expect((await entryOf(res)).expense?.note).toBe(step.note);
+      expect(await balanceOf(ledgerId, ALEX)).toBe(step.balance);
+      target = body.id; // the new tip
+    }
+    expect(await countRows("expenses")).toBe(5);
+  });
+
+  it("re-voiding a row that is already reversed => 409 'already voided', even mid-chain", async () => {
     const e1 = expenseBody();
     expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, e1)).status).toBe(201);
     const voidBody = { id: crypto.randomUUID(), occurred_on: "2026-08-03" };
@@ -640,16 +704,22 @@ describe("POST /api/ledgers/:id/expenses/:expenseId/void — reversal semantics"
         await post(`/api/ledgers/${ledgerId}/expenses/${e1["id"]}/void`, ALEX, voidBody)
       ).status,
     ).toBe(201);
+    const unvoidBody = { id: crypto.randomUUID(), occurred_on: "2026-08-04" };
+    expect(
+      (
+        await post(`/api/ledgers/${ledgerId}/expenses/${voidBody.id}/void`, ALEX, unvoidBody)
+      ).status,
+    ).toBe(201);
 
-    const res = await post(
-      `/api/ledgers/${ledgerId}/expenses/${voidBody.id}/void`,
-      ALEX,
-      { id: crypto.randomUUID(), occurred_on: "2026-08-04" },
-    );
+    // The reversal is spent — only the tip may be targeted again.
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${voidBody.id}/void`, ALEX, {
+      id: crypto.randomUUID(),
+      occurred_on: "2026-08-06",
+    });
     expect(res.status).toBe(409);
     const err = (await res.json()) as ErrorResponse;
-    expect(err.error).toBe("cannot void a void");
-    expect(await countRows("expenses")).toBe(2);
+    expect(err.error).toBe("already voided");
+    expect(await countRows("expenses")).toBe(3);
   });
 
   it("voiding an expense that lives in ANOTHER ledger => 404, even for a member of both", async () => {

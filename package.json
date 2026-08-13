@@ -7,7 +7,7 @@
     "build": "vite build",
     "dev": "wrangler dev",
     "dev:client": "vite",
-    "deploy": "npm run build && wrangler deploy",
+    "deploy": "wrangler deploy",
     "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.client.json && tsc -p tsconfig.test.json",
     "test": "npm run typecheck && vitest run",
     "test:watch": "vitest",

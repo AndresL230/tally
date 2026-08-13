@@ -298,18 +298,37 @@ export function registerMutations(app: Hono<AppContext>): void {
         reverses_id: string | null;
       }>();
     if (!original) return c.json({ error: "not found" }, 404);
-    if (original.reverses_id) {
-      return c.json({ error: "cannot void a void" }, 409);
-    }
+    // Voiding a reversal is how UNVOID works: the ledger is append-only, so
+    // undoing a void appends a reversal OF the void rather than deleting a
+    // row. The negation below makes the third entry restore the first
+    // exactly, and UNIQUE(reverses_id) still holds because each new reversal
+    // targets the chain TIP — a row nothing has reversed yet.
     if (priorReversal) {
       return c.json({ error: "already voided" }, 409);
     }
+
+    // What this row DOES alternates down the chain: reversing a live entry
+    // (even depth) voids it, reversing a live void (odd depth) puts it back.
+    // "Is the target a reversal?" is not enough — that calls every row from
+    // the third onward an unvoid.
+    const chain = await c.env.DB.prepare(
+      `WITH RECURSIVE up(id, reverses_id, depth) AS (
+         SELECT id, reverses_id, 0 FROM expenses WHERE id = ?1
+         UNION ALL
+         SELECT e.id, e.reverses_id, up.depth + 1
+         FROM expenses e JOIN up ON e.id = up.reverses_id
+       )
+       SELECT MAX(depth) AS depth FROM up`,
+    )
+      .bind(original.id)
+      .first<{ depth: number }>();
+    const note = (chain?.depth ?? 0) % 2 === 0 ? "Void" : "Unvoid";
 
     try {
       const result = await c.env.DB.prepare(
         `INSERT INTO expenses (id, ledger_id, occurred_on, merchant, total_cents, payer,
            other_share_cents, method, note, receipt_id, extra_cents, created_by, created_at, reverses_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'Void', NULL, NULL, ?9, ?10, ?11)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, NULL, ?10, ?11, ?12)
          ON CONFLICT(id) DO NOTHING`,
       )
         .bind(
@@ -321,6 +340,7 @@ export function registerMutations(app: Hono<AppContext>): void {
           original.payer,
           -original.other_share_cents,
           original.method,
+          note,
           email,
           Date.now(),
           original.id,

@@ -592,11 +592,13 @@ export default function App() {
     }
   };
 
-  const commitVoid = async (entry: ApiEntry) => {
+  /** Voids `targetId`. Unvoiding is the same call aimed at the live
+   *  reversal: the ledger is append-only, so undo appends a third row. */
+  const commitVoid = async (targetId: string) => {
     if (busy) return;
     setBusy(true);
     try {
-      await api.voidExpense(detail.ledger.id, entry.id, {
+      await api.voidExpense(detail.ledger.id, targetId, {
         id: takeIntentId(),
         occurred_on: todayISO(),
       });

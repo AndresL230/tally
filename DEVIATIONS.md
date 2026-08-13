@@ -98,3 +98,56 @@ sits unused until that address is added to the Access policy — the
 policy is the real gatekeeper (rule: adding a friend = policy AND
 ledger); there is no ledger deletion, deliberately, in an append-only
 system.
+
+## D11. Quantity lines expand into per-unit rows on the confirm screen
+
+Extraction records "Boba Tea ×3 … $15.00" as ONE line priced for the
+whole line, which made the three teas a single indivisible assignment —
+no way to say two are mine and one is Kenny's. The confirm screen now
+expands a line whose qty display string parses as a count (bare "3",
+"×3"/"3x"/"*3" either side, "3 @ $5.00") into n one-unit rows before the
+user assigns anything: unit prices are trunc(line/n) with the leftover
+cents landing one each on the first units, so the units always sum back
+to the line exactly (penny rule, integer math in shared/units.ts). The
+qty suffix is dropped from unit rows (three rows each reading "×3" would
+lie) and the label repeats; because expansion happens where the list is
+built, the posted items are already unit rows and the server's split
+math is untouched. Guardrails: counts outside 2..20 pass through
+unchanged (a bigger count is more likely a weight or a mis-read than
+20+ units anyone assigns one by one), weights like "2 lb" never parse,
+and expansion walks left to right only as far as keeps the whole list
+within the API's 100-item cap — later lines simply stay unexpanded
+rather than blowing the POST. Entries posted before this change keep
+their stored "×n" rows and render as before.
+
+## D12. Manual entry states the balance movement before it is committed
+
+The manual screen took "who paid" and "the friend's share percent" as two
+independent controls and committed without ever saying who ended up owing
+whom. Those two have to be read TOGETHER, and the pairing that moves nothing
+— you paid, 0% theirs ("All yours") — is one tap away from the pairing that
+records a debt you owe. A real $0.25 entry was recorded that way: total 25,
+other_share 0, a row that renders "−$0.00" and moves no balance. The screen
+now carries the outcome line its sibling PercentScreen always had ("Kenny
+will owe you $0.25 of $0.25" / "You'll owe Kenny …"), and the zero case is
+called out in the accent color rather than passing silently. The commit is
+NOT blocked: a bill you paid that is entirely your own share is a legal, if
+inert, entry — it just may no longer be committed by accident. The direction
+math is shared/tested (`expenseEffect`) rather than inlined per screen.
+
+## D13. Unvoid exists, and it is a void of the void (supersedes "cannot void a void")
+
+Voiding was one-way: the route answered 409 "cannot void a void" and the
+detail screen showed a dead "Voided." label. Undo is now supported without
+breaking the append-only rule — unvoid appends a reversal OF the reversal, so
+nothing is ever updated or deleted. Because the reversal's other_share is the
+negation of its target's, the third row restores the first exactly, and the
+chain can be stacked indefinitely: E, E←R1 (voided), E←R1←R2 (live again),
+E←R1←R2←R3 (voided). UNIQUE(reverses_id) survives untouched because each new
+reversal targets the chain TIP, a row nothing has reversed yet; targeting a
+spent mid-chain row still answers 409 "already voided". The consequence
+everywhere else is that a row's live state is the PARITY of its chain, not
+the presence of reversed_by — resolved once in shared/voids.ts and used by
+the detail screen, the ledger rows, and the settled-summary receipt count.
+Reversal rows carry note 'Void' or 'Unvoid' so the ledger reads honestly, at
+the cost of three visible rows for one net entry.

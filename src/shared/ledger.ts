@@ -33,6 +33,26 @@ export function otherMember(viewer: string, ledger: LedgerIdentity): string {
   throw new Error("viewer is not a member of this ledger");
 }
 
+/** What a pending expense would do to the viewer's balance. The entry
+ *  screens state this BEFORE committing: "who paid" and "the friend's share
+ *  percent" have to be read together to know who ends up owing whom, and the
+ *  combination that moves nothing is easy to reach by accident. */
+export type BalanceEffect =
+  | { kind: "none" }
+  | { kind: "friend_owes_viewer"; cents: number }
+  | { kind: "viewer_owes_friend"; cents: number };
+
+export function expenseEffect(
+  otherShareCents: number,
+  payerIsViewer: boolean,
+): BalanceEffect {
+  const delta = payerIsViewer ? otherShareCents : -otherShareCents;
+  if (delta === 0) return { kind: "none" };
+  return delta > 0
+    ? { kind: "friend_owes_viewer", cents: delta }
+    : { kind: "viewer_owes_friend", cents: -delta };
+}
+
 /** Canonical member ordering for a new ledger. */
 export function orderMembers(x: string, y: string): [string, string] {
   const a = x.toLowerCase();

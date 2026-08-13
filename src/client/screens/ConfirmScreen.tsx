@@ -11,6 +11,7 @@ import {
   needsBeatConfirm,
   stateToAssigned,
 } from "../../shared/assign";
+import { expandQtyItems } from "../../shared/units";
 import { ARCHIVO, CARD, INK, MONO, MUTED_1, MUTED_2, MUTED_3, MUTED_4, PAPER, SERIF, halfBg, type Colors } from "../theme";
 import { isISODate, todayISO } from "../util";
 
@@ -75,8 +76,13 @@ export function ConfirmScreen({
   onCommit,
   onFallbackPercent,
 }: ConfirmScreenProps) {
+  // Quantity lines ("Boba Tea ×3", priced for the whole line) arrive here
+  // expanded into one row per unit so each unit can be assigned separately
+  // — visibly, while the user can still see and undo it. The posted items
+  // are then already unit rows, so the server's split math is untouched.
+  // Unit prices sum back to the line exactly (shared/units.ts).
   const [items, setItems] = useState<ConfirmItem[]>(() =>
-    initialItems.map((it) => ({
+    expandQtyItems(initialItems).map((it) => ({
       key: it.id,
       label: it.label ?? "Item",
       qty: it.qty || null,

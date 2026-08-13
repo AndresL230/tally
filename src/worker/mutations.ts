@@ -375,4 +375,103 @@ export function registerMutations(app: Hono<AppContext>): void {
     }
     return c.json({ entry: await entryResponse(c.env.DB, ledger, email, id) }, 201);
   });
+
+  // The ledger's ONE in-place edit. Everything else appends; swapping who
+  // paid rewrites the row instead, because void-and-repost would cost two
+  // extra ledger rows for what reads as a correction. The row records that
+  // it happened (amended_at/amended_by) so the change isn't silent.
+  //
+  // The body names the TARGET payer rather than asking for a "swap", so a
+  // retry can't flip it twice: naming the payer it already has is a no-op.
+  app.post("/api/ledgers/:id/expenses/:expenseId/payer", async (c) => {
+    const email = c.get("email");
+    const ledger = await ledgerForMember(c.env.DB, c.req.param("id"), email);
+    if (!ledger) return c.json({ error: "not found" }, 404);
+
+    const body = await readJson(c.req.raw);
+    const payer = assertString(body.payer, "payer").toLowerCase();
+    if (payer !== ledger.person_a && payer !== ledger.person_b) {
+      throw new ValidationError("payer must be a ledger member");
+    }
+
+    const expense = await c.env.DB.prepare(
+      `SELECT id, total_cents, payer, other_share_cents, method, receipt_id, reverses_id
+       FROM expenses WHERE id = ?1 AND ledger_id = ?2`,
+    )
+      .bind(c.req.param("expenseId"), ledger.id)
+      .first<{
+        id: string;
+        total_cents: number;
+        payer: string;
+        other_share_cents: number;
+        method: string;
+        receipt_id: string | null;
+        reverses_id: string | null;
+      }>();
+    if (!expense) return c.json({ error: "not found" }, 404);
+    if (expense.reverses_id) {
+      return c.json({ error: "cannot change the payer of a void" }, 409);
+    }
+
+    // Voided entries are off limits until they're put back — editing one
+    // would quietly change what the eventual unvoid restores. Live state is
+    // the parity of the reversal chain, same rule the client uses.
+    const chain = await c.env.DB.prepare(
+      `WITH RECURSIVE down(id, depth) AS (
+         SELECT id, 0 FROM expenses WHERE id = ?1
+         UNION ALL
+         SELECT e.id, down.depth + 1 FROM expenses e JOIN down ON e.reverses_id = down.id
+       )
+       SELECT MAX(depth) AS depth FROM down`,
+    )
+      .bind(expense.id)
+      .first<{ depth: number }>();
+    if ((chain?.depth ?? 0) % 2 === 1) {
+      return c.json({ error: "entry is voided" }, 409);
+    }
+
+    if (expense.payer === payer) {
+      // Already there: no write, no stamp.
+      return c.json({ entry: await entryResponse(c.env.DB, ledger, email, expense.id) }, 200);
+    }
+
+    const other = payer === ledger.person_a ? ledger.person_b : ledger.person_a;
+    // other_share is the NON-payer's share, so flipping the payer flips whose
+    // share it names. For percent/manual that's the remainder. For items the
+    // server recomputes from the stored assignments — each side's cut of the
+    // extra is rounded on its own, so subtraction is not guaranteed to agree.
+    let otherShare = expense.total_cents - expense.other_share_cents;
+    if (expense.method === "items" && expense.receipt_id) {
+      const { results } = await c.env.DB.prepare(
+        "SELECT price_cents, assigned_to FROM receipt_items WHERE receipt_id = ?1",
+      )
+        .bind(expense.receipt_id)
+        .all<{ price_cents: number | null; assigned_to: string | null }>();
+      if (results.length) {
+        try {
+          otherShare = splitItems(
+            results.map((r) => ({
+              price_cents: r.price_cents ?? 0,
+              assigned_to: r.assigned_to ?? other,
+            })),
+            payer,
+            other,
+            expense.total_cents,
+          ).other_share_cents;
+        } catch {
+          // Malformed item data (an assignment naming neither member): keep
+          // the subtraction fallback rather than failing the swap.
+        }
+      }
+    }
+
+    await c.env.DB.prepare(
+      `UPDATE expenses SET payer = ?3, other_share_cents = ?4, amended_at = ?5, amended_by = ?6
+       WHERE id = ?1 AND ledger_id = ?2`,
+    )
+      .bind(expense.id, ledger.id, payer, otherShare, Date.now(), email)
+      .run();
+
+    return c.json({ entry: await entryResponse(c.env.DB, ledger, email, expense.id) }, 200);
+  });
 }

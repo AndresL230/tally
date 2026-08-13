@@ -62,6 +62,9 @@ export interface ApiExpense {
   reverses_id: string | null;
   /** Set when another entry reverses this one. */
   reversed_by: string | null;
+  /** Set when the payer was swapped in place; the ledger's one edit. */
+  amended_at: number | null;
+  amended_by: string | null;
   items: ApiItem[] | null;
 }
 

@@ -7,6 +7,7 @@ import { chainDepth, chainTip, isVoided as chainVoided, voidChain } from "../../
 import { divRoundHalfUp, splitItems, type SplitResult } from "../../shared/money";
 import { longDate, money, moneyAbs, moneySigned } from "../../shared/format";
 import { ARCHIVO, CARD, INK, MONO, MUTED_1, MUTED_2, MUTED_3, SERIF, halfBg, type Colors } from "../theme";
+import { isoDay } from "../util";
 
 // Port of the mockup's entry detail (sc-if isDetail): delta hero in the
 // serif face, readonly item list with the spine/tint vocabulary, extra
@@ -23,9 +24,19 @@ export interface DetailScreenProps {
   /** Voids the given entry id. Unvoiding is the same call aimed at the live
    *  reversal — the ledger is append-only, so undo appends, never deletes. */
   onVoid: (targetId: string) => void;
+  /** Swaps who paid, in place. Names the target payer, never "the other one". */
+  onSetPayer: (entryId: string, payer: string) => void;
 }
 
-export function DetailScreen({ entry, detail, colors: C, friendName: F, onBack, onVoid }: DetailScreenProps) {
+export function DetailScreen({
+  entry,
+  detail,
+  colors: C,
+  friendName: F,
+  onBack,
+  onVoid,
+  onSetPayer,
+}: DetailScreenProps) {
   const [armed, setArmed] = useState(false);
   const { viewer, ledger } = detail;
   const friendEmail = otherMember(viewer, ledger);
@@ -54,7 +65,16 @@ export function DetailScreen({ entry, detail, colors: C, friendName: F, onBack, 
       : `${F} paid`;
 
   const title = isPay ? "Settle up" : (ex?.merchant ?? "");
-  const moveLine = isPay ? "came off the balance" : pos ? `${F} owed you` : `you owed ${F}`;
+  // An expense can settle to nothing — whoever paid also had the whole
+  // share. "you owed ${F} −$0.00" would read as a debt; it isn't one.
+  const zeroMove = !isPay && dv === 0;
+  const moveLine = isPay
+    ? "came off the balance"
+    : zeroMove
+      ? "didn't move the balance"
+      : pos
+        ? `${F} owed you`
+        : `you owed ${F}`;
 
   // Note block: settlements, percent/manual entries, and reversals.
   const items = ex?.items ?? [];
@@ -169,10 +189,10 @@ export function DetailScreen({ entry, detail, colors: C, friendName: F, onBack, 
               fontSize: 38,
               lineHeight: 1,
               fontVariantNumeric: "tabular-nums",
-              color: isPay ? MUTED_2 : pos ? C.me : C.fr,
+              color: isPay || zeroMove ? MUTED_2 : pos ? C.me : C.fr,
             }}
           >
-            {moneySigned(dv)}
+            {zeroMove ? moneyAbs(0) : moneySigned(dv)}
           </span>
           <span style={{ font: `500 14px ${ARCHIVO}`, color: MUTED_1 }}>{moveLine}</span>
         </div>
@@ -265,6 +285,35 @@ export function DetailScreen({ entry, detail, colors: C, friendName: F, onBack, 
               }}
             />
           </div>
+        )}
+
+        {/* Who paid, swappable in place — the ledger's one edit. Single tap,
+            no arming: unlike a void it undoes itself with another tap. Hidden
+            on voids and voided entries, which the server refuses anyway. */}
+        {ex && !isReversal && !isVoided && (
+          <>
+            <button
+              onClick={() => onSetPayer(entry.id, ex.payer === viewer ? friendEmail : viewer)}
+              style={{
+                width: "100%",
+                marginTop: 26,
+                height: 52,
+                borderRadius: 14,
+                border: "1px solid rgba(0,0,0,.18)",
+                background: "transparent",
+                color: INK,
+                font: `600 15px ${ARCHIVO}`,
+                cursor: "pointer",
+              }}
+            >
+              {ex.payer === viewer ? `Switch to "${F} paid"` : `Switch to "you paid"`}
+            </button>
+            {ex.amended_at && (
+              <div style={{ marginTop: 10, font: `400 12.5px ${MONO}`, color: MUTED_3 }}>
+                Payer changed by {ex.amended_by === viewer ? "you" : F} on {longDate(isoDay(ex.amended_at))}.
+              </div>
+            )}
+          </>
         )}
 
         {/* Void / unvoid affordance (M1, no mockup design — beat-confirm

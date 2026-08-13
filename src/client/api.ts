@@ -145,6 +145,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  /** Swap who paid, in place. Names the TARGET payer, so a retry can't flip
+   *  it twice; the server recomputes the share and stamps the amendment. */
+  setPayer: (ledgerId: string, expenseId: string, payer: string) =>
+    request<{ entry: ApiEntry }>(`/api/ledgers/${ledgerId}/expenses/${expenseId}/payer`, {
+      method: "POST",
+      body: JSON.stringify({ payer }),
+    }),
   voidExpense: (ledgerId: string, expenseId: string, body: VoidExpenseBody) =>
     request<{ entry: ApiEntry }>(`/api/ledgers/${ledgerId}/expenses/${expenseId}/void`, {
       method: "POST",

@@ -195,8 +195,9 @@ a price therefore had no fix short of cancelling and splitting by percentage.
 
 Each row now carries an editable amount and a ✕. Crossing a row out does NOT
 delete it: it stays in place, greyed and struck through, reading "Not on this
-split", with Undo in the ✕'s spot — the same toggle, so a mis-tap costs one
-tap, and what the scan actually read stays on screen instead of vanishing.
+split", with ↺ in the ✕'s spot — the same toggle in the same box (a wider
+text control would slide every amount sideways as rows are crossed out), so
+a mis-tap costs one tap, and what the scan actually read stays on screen instead of vanishing.
 Only `includedItems` reaches the subtotal, the split, the beat-confirm rule,
 and the posted items; the server needs no change, since a receipt-linked
 expense already replaces `receipt_items` with the confirmed set.

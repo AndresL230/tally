@@ -191,7 +191,8 @@ export function ConfirmScreen({
     disarm();
   };
 
-  // ✕ crosses the row out, Undo puts it back — the same toggle, so a
+  // ✕ crosses the row out, ↺ puts it back — the same toggle in the same
+  // box, so a
   // mis-tap costs one tap and the scan's own reading stays on screen.
   const toggleItem = (key: string) => {
     setItems(toggleExcluded(items, key));
@@ -399,13 +400,13 @@ export function ConfirmScreen({
 
           {/* The row is no longer one big button: tapping the label cycles
               the assignment, the amount is an input, and ✕ crosses the row
-              out (Undo, in its place, brings it back). Nesting those inside
+              out (↺, in its place, brings it back). Nesting those inside
               a button would be invalid, so the row is a div and the tap
               target is the label half. A crossed-out row keeps its place,
               greyed and struck through, and stops responding to everything
               but Undo. */}
           {items.map((i) => (
-            <div key={i.key} style={{ display: "flex", alignItems: "stretch" }}>
+            <div key={i.key} className="receipt-row" style={{ display: "flex", alignItems: "stretch" }}>
               <span
                 style={{
                   width: 10,
@@ -529,21 +530,23 @@ export function ConfirmScreen({
                   aria-label={i.excluded ? `Put ${i.label} back` : `Cross out ${i.label}`}
                   title={i.excluded ? `Put ${i.label} back` : `Cross out ${i.label}`}
                   style={{
+                    // Same box in both states: a wider "Undo" would squeeze
+                    // the dotted leader and slide every amount sideways as
+                    // rows are crossed out.
                     flex: "none",
-                    width: i.excluded ? 44 : 30,
+                    width: 30,
                     height: 30,
                     marginLeft: 4,
                     alignSelf: "center",
                     border: 0,
                     borderRadius: 8,
                     background: "transparent",
-                    font: i.excluded ? `600 12.5px/1 ${ARCHIVO}` : `500 14px/1 ${ARCHIVO}`,
+                    font: i.excluded ? `500 17px/1 ${ARCHIVO}` : `500 14px/1 ${ARCHIVO}`,
                     color: i.excluded ? C.me : MUTED_3,
-                    textDecoration: i.excluded ? "underline" : "none",
                     cursor: "pointer",
                   }}
                 >
-                  {i.excluded ? "Undo" : "✕"}
+                  {i.excluded ? "↺" : "✕"}
                 </button>
               </div>
             </div>
@@ -713,8 +716,8 @@ export function ConfirmScreen({
           <br />
           If the scan got a line wrong, type over its amount, or cross it out
           with ✕ to leave it off the split — the total follows the items,
-          keeping tax and tip where they are, and Undo on the crossed-out row
-          brings it back. Type over the total instead to pin it to what the
+          keeping tax and tip where they are, and ↺ on the crossed-out row brings
+          it back. Type over the total instead to pin it to what the
           paper says.
         </div>
       </div>

@@ -12,6 +12,13 @@ import {
   stateToAssigned,
 } from "../../shared/assign";
 import { expandQtyItems } from "../../shared/units";
+import {
+  extraFromTotal,
+  includedItems,
+  subtotalOf,
+  toggleExcluded,
+  totalFromExtra,
+} from "../../shared/items";
 import { ARCHIVO, CARD, INK, MONO, MUTED_1, MUTED_2, MUTED_3, MUTED_4, PAPER, SERIF, halfBg, type Colors } from "../theme";
 import { isISODate, todayISO } from "../util";
 
@@ -21,6 +28,15 @@ import { isISODate, todayISO } from "../util";
 // dotted row. Item st codes (0/1/2) live only inside this component;
 // canonical assigned_to crosses the boundary in both directions
 // (assignedToState on load, stateToAssigned at commit).
+//
+// The scan is a draft: every row can be repriced here, or crossed out —
+// struck through in place, never deleted, so the user can see what the
+// scan read and put it back. Only the rows that still count reach the
+// split. That makes the ITEM LIST what the user edits and the total a
+// derived number: the extra (tax and tip) is the held quantity and
+// total = subtotal + extra (DEVIATIONS D15). Typing over the total pins
+// it by re-deriving the extra, the inverse; both derivations live in
+// shared/items.ts.
 
 interface ConfirmItem {
   key: string;
@@ -28,6 +44,8 @@ interface ConfirmItem {
   qty: string | null;
   price_cents: number;
   st: ItemState;
+  /** Crossed out: still shown, out of every number. */
+  excluded: boolean;
 }
 
 export interface ConfirmCommit {
@@ -88,6 +106,7 @@ export function ConfirmScreen({
       qty: it.qty || null,
       price_cents: it.price_cents ?? 0,
       st: assignedToState(it.assigned_to, viewerEmail, friendEmail),
+      excluded: false,
     })),
   );
   const initialSubtotal = useMemo(
@@ -97,15 +116,29 @@ export function ConfirmScreen({
 
   const [merchant, setMerchant] = useState(receipt.merchant ?? "");
   const [date, setDate] = useState(receipt.purchased_on ?? todayISO());
-  // Items keep their prices no matter what; editing the total only moves
-  // the extra line (extra = total - subtotal, possibly negative).
-  const [totalCents, setTotalCents] = useState<number>(receipt.total_cents ?? initialSubtotal);
-  const [totalText, setTotalText] = useState<string>(moneyAbs(receipt.total_cents ?? initialSubtotal));
+  // The extra (tax and tip) is HELD and the total derives from the items,
+  // so removing or repricing a row moves the total by that much. What the
+  // scan read off the paper sets the opening extra.
+  const [extraCents, setExtraCents] = useState<number>(() =>
+    extraFromTotal(receipt.total_cents ?? initialSubtotal, initialSubtotal),
+  );
   const [payer, setPayer] = useState<"me" | "friend">("me");
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPrice, setNewPrice] = useState("");
   const [beat, setBeat] = useState(false);
+  // Only one price is ever mid-edit; while it is, the field shows the raw
+  // keystrokes and every other row shows its stored price.
+  const [editingPrice, setEditingPrice] = useState<{ key: string; text: string } | null>(null);
+  const [totalFocused, setTotalFocused] = useState(false);
+  const [totalText, setTotalText] = useState("");
+
+  // Crossed-out rows are still rendered; from here down, only the included
+  // ones exist. Nothing crossed out reaches the subtotal, the split, or the
+  // ledger.
+  const included = includedItems(items);
+  const subtotalCents = subtotalOf(included);
+  const totalCents = totalFromExtra(subtotalCents, extraCents);
 
   const disarm = () => setBeat(false);
 
@@ -114,7 +147,7 @@ export function ConfirmScreen({
 
   // ALL live money comes out of splitItems — never local arithmetic.
   const split = splitItems(
-    items.map((i) => ({ price_cents: i.price_cents, assigned_to: stateToAssigned(i.st, viewerEmail, friendEmail) })),
+    included.map((i) => ({ price_cents: i.price_cents, assigned_to: stateToAssigned(i.st, viewerEmail, friendEmail) })),
     payerEmail,
     otherEmail,
     totalCents,
@@ -127,8 +160,8 @@ export function ConfirmScreen({
   const barPct = (share: number) =>
     `${Math.max(0, Math.min(100, divRoundHalfUp(share * 100, Math.max(1, totalCents))))}%`;
 
-  const hasItems = items.length > 0;
-  const needsBeat = needsBeatConfirm(items.map((i) => i.st));
+  const hasItems = included.length > 0;
+  const needsBeat = needsBeatConfirm(included.map((i) => i.st));
   const valid = hasItems && merchant.trim().length > 0 && isISODate(date);
 
   const tapItem = (key: string) => {
@@ -142,7 +175,14 @@ export function ConfirmScreen({
     if (!canAddItem || newPriceCents === null) return;
     setItems((prev) =>
       prev.concat([
-        { key: crypto.randomUUID(), label: newName.trim(), qty: null, price_cents: newPriceCents, st: 0 },
+        {
+          key: crypto.randomUUID(),
+          label: newName.trim(),
+          qty: null,
+          price_cents: newPriceCents,
+          st: 0,
+          excluded: false,
+        },
       ]),
     );
     setNewName("");
@@ -151,31 +191,50 @@ export function ConfirmScreen({
     disarm();
   };
 
-  const commitTotal = () => {
-    const cents = parseDollarsToCents(totalText);
-    if (cents === null) {
-      setTotalText(moneyAbs(totalCents)); // revert an unparseable edit
-      return;
-    }
-    setTotalCents(cents);
-    setTotalText(moneyAbs(cents));
+  // ✕ crosses the row out, ↺ puts it back — the same toggle in the same
+  // box, so a
+  // mis-tap costs one tap and the scan's own reading stays on screen.
+  const toggleItem = (key: string) => {
+    setItems(toggleExcluded(items, key));
+    if (editingPrice?.key === key) setEditingPrice(null);
     disarm();
   };
 
-  // The extra (tax and tip) line is editable too: typing an amount re-derives
-  // the total as items + extra, the inverse of editing the total. While the
-  // field isn't focused it renders the derived split.extra_cents, so item
-  // adds and total edits keep it honest.
-  const subtotalCents = items.reduce((a, i) => a + i.price_cents, 0);
+  // Repricing a row is the other half of fixing a bad scan: the subtotal
+  // follows the typed price, and so does the total. An unparseable edit
+  // reverts to the stored price rather than guessing.
+  const commitPrice = (key: string) => {
+    const edit = editingPrice;
+    setEditingPrice(null);
+    if (!edit || edit.key !== key) return;
+    const cents = parseDollarsToCents(edit.text);
+    if (cents === null) return;
+    setItems((prev) => prev.map((i) => (i.key === key ? { ...i, price_cents: cents } : i)));
+    disarm();
+  };
+
+  // Typing a total PINS it: the extra absorbs the difference, which is the
+  // inverse of the items -> total derivation. An unparseable edit falls back
+  // to the derived total.
+  const commitTotal = () => {
+    setTotalFocused(false);
+    const cents = parseDollarsToCents(totalText);
+    if (cents === null) return;
+    setExtraCents(extraFromTotal(cents, subtotalCents));
+    disarm();
+  };
+
+  // The extra (tax and tip) line is editable directly too. Unfocused it
+  // renders split.extra_cents rather than the held value, so a total clamped
+  // at zero (a discount larger than what the remaining items cost) shows the
+  // extra the split math actually used.
   const [extraFocused, setExtraFocused] = useState(false);
   const [extraText, setExtraText] = useState("");
   const commitExtra = () => {
     setExtraFocused(false);
     const cents = parseDollarsToCents(extraText);
     if (cents === null) return; // unparseable: fall back to the derived value
-    const nextTotal = subtotalCents + cents;
-    setTotalCents(nextTotal);
-    setTotalText(moneyAbs(nextTotal));
+    setExtraCents(cents);
     disarm();
   };
 
@@ -190,7 +249,7 @@ export function ConfirmScreen({
       occurred_on: date,
       total_cents: totalCents,
       payer: payerEmail,
-      items: items.map((i) => ({
+      items: included.map((i) => ({
         label: i.label,
         qty: i.qty,
         price_cents: i.price_cents,
@@ -261,10 +320,18 @@ export function ConfirmScreen({
           <label style={{ width: 118, display: "block" }}>
             <span style={capsLabel}>Total</span>
             <input
-              value={totalText}
+              value={totalFocused ? totalText : moneyAbs(totalCents)}
               inputMode="decimal"
+              onFocus={(e) => {
+                setTotalFocused(true);
+                setTotalText(moneyAbs(totalCents));
+                e.target.select();
+              }}
               onChange={(e) => setTotalText(e.target.value)}
               onBlur={commitTotal}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+              }}
               style={{
                 width: "100%",
                 height: 30,
@@ -327,45 +394,73 @@ export function ConfirmScreen({
               color: MUTED_3,
             }}
           >
-            <span>{items.length} items — tap to assign</span>
+            <span>{included.length} items — tap to assign</span>
             <span>Amount</span>
           </div>
 
+          {/* The row is no longer one big button: tapping the label cycles
+              the assignment, the amount is an input, and ✕ crosses the row
+              out (↺, in its place, brings it back). Nesting those inside
+              a button would be invalid, so the row is a div and the tap
+              target is the label half. A crossed-out row keeps its place,
+              greyed and struck through, and stops responding to everything
+              but Undo. */}
           {items.map((i) => (
-            <button
-              key={i.key}
-              onClick={() => tapItem(i.key)}
-              style={{
-                width: "100%",
-                display: "flex",
-                alignItems: "stretch",
-                background: "transparent",
-                border: 0,
-                padding: 0,
-                cursor: "pointer",
-                textAlign: "left",
-              }}
-            >
+            <div key={i.key} className="receipt-row" style={{ display: "flex", alignItems: "stretch" }}>
               <span
                 style={{
                   width: 10,
                   flex: "none",
-                  background: i.st === 0 ? C.fr : i.st === 1 ? C.me : halfBg(C),
+                  background: i.excluded
+                    ? "rgba(0,0,0,.10)"
+                    : i.st === 0
+                      ? C.fr
+                      : i.st === 1
+                        ? C.me
+                        : halfBg(C),
                 }}
               />
-              <span
+              <div
                 style={{
                   flex: 1,
+                  minWidth: 0,
                   display: "flex",
                   alignItems: "center",
                   padding: "13px 14px",
                   minHeight: 62,
                   borderBottom: "1px solid rgba(0,0,0,.07)",
-                  background: i.st === 0 ? "rgba(44,40,35,.05)" : i.st === 1 ? `${C.me}1f` : `${C.me}0d`,
+                  background: i.excluded
+                    ? "rgba(0,0,0,.02)"
+                    : i.st === 0
+                      ? "rgba(44,40,35,.05)"
+                      : i.st === 1
+                        ? `${C.me}1f`
+                        : `${C.me}0d`,
                 }}
               >
-                <span style={{ flex: 1, minWidth: 0, display: "block" }}>
-                  <span style={{ display: "block", font: `500 16px ${ARCHIVO}`, color: INK }}>
+                <button
+                  onClick={() => tapItem(i.key)}
+                  disabled={i.excluded}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: "block",
+                    alignSelf: "stretch",
+                    border: 0,
+                    background: "transparent",
+                    padding: 0,
+                    cursor: i.excluded ? "default" : "pointer",
+                    textAlign: "left",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "block",
+                      font: `500 16px ${ARCHIVO}`,
+                      color: i.excluded ? MUTED_3 : INK,
+                      textDecoration: i.excluded ? "line-through" : "none",
+                    }}
+                  >
                     {i.label}
                     {i.qty ? `  ${i.qty}` : ""}
                   </span>
@@ -374,38 +469,87 @@ export function ConfirmScreen({
                       display: "block",
                       marginTop: 3,
                       font: `500 11.5px ${MONO}`,
-                      color: i.st === 0 ? C.fr : i.st === 1 ? C.me : MUTED_2,
+                      color: i.excluded ? MUTED_4 : i.st === 0 ? C.fr : i.st === 1 ? C.me : MUTED_2,
                     }}
                   >
-                    {i.st === 0
-                      ? `${F}'s`
-                      : i.st === 1
-                        ? "Yours"
-                        : `${moneyAbs(divRoundHalfUp(i.price_cents, 2))} each`}
+                    {i.excluded
+                      ? "Not on this split"
+                      : i.st === 0
+                        ? `${F}'s`
+                        : i.st === 1
+                          ? "Yours"
+                          : `${moneyAbs(divRoundHalfUp(i.price_cents, 2))} each`}
                   </span>
-                </span>
+                </button>
                 <span
                   style={{
-                    flex: "none",
-                    width: 56,
+                    flex: "0 1 40px",
+                    minWidth: 10,
                     borderBottom: "1px dotted rgba(0,0,0,.22)",
                     alignSelf: "center",
                     height: 1,
-                    margin: "0 10px",
+                    margin: "0 8px",
+                    opacity: i.excluded ? 0.4 : 1,
                   }}
                 />
-                <span
+                <input
+                  value={editingPrice?.key === i.key ? editingPrice.text : moneyAbs(i.price_cents)}
+                  inputMode="decimal"
+                  disabled={i.excluded}
+                  aria-label={`Price of ${i.label}`}
+                  onFocus={(e) => {
+                    setEditingPrice({ key: i.key, text: moneyAbs(i.price_cents) });
+                    e.target.select();
+                  }}
+                  onChange={(e) => setEditingPrice({ key: i.key, text: e.target.value })}
+                  onBlur={() => commitPrice(i.key)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
                   style={{
                     flex: "none",
+                    width: 68,
+                    border: 0,
+                    borderBottom: i.excluded ? "1px solid transparent" : "1px dashed rgba(0,0,0,.28)",
+                    background: "transparent",
+                    padding: "0 0 2px",
+                    alignSelf: "center",
                     font: `500 15px ${MONO}`,
                     fontVariantNumeric: "tabular-nums",
+                    textAlign: "right",
+                    color: i.excluded ? MUTED_3 : INK,
+                    textDecoration: i.excluded ? "line-through" : "none",
+                    // A disabled input is dimmed by the UA (iOS Safari most
+                    // of all); the crossed-out row states its own greying.
+                    WebkitTextFillColor: i.excluded ? MUTED_3 : undefined,
+                    opacity: 1,
+                  }}
+                />
+                <button
+                  onClick={() => toggleItem(i.key)}
+                  aria-label={i.excluded ? `Put ${i.label} back` : `Cross out ${i.label}`}
+                  title={i.excluded ? `Put ${i.label} back` : `Cross out ${i.label}`}
+                  style={{
+                    // Same box in both states: a wider "Undo" would squeeze
+                    // the dotted leader and slide every amount sideways as
+                    // rows are crossed out.
+                    flex: "none",
+                    width: 30,
+                    height: 30,
+                    marginLeft: 4,
                     alignSelf: "center",
+                    border: 0,
+                    borderRadius: 8,
+                    background: "transparent",
+                    font: i.excluded ? `500 17px/1 ${ARCHIVO}` : `500 14px/1 ${ARCHIVO}`,
+                    color: i.excluded ? C.me : MUTED_3,
+                    cursor: "pointer",
                   }}
                 >
-                  {moneyAbs(i.price_cents)}
-                </span>
-              </span>
-            </button>
+                  {i.excluded ? "↺" : "✕"}
+                </button>
+              </div>
+            </div>
           ))}
 
           {adding && (
@@ -568,6 +712,13 @@ export function ConfirmScreen({
           price), and a third time to hand it back to {F}. The colored edge
           shows whose it is; tax and tip divide themselves in proportion to
           what each of you took.
+          <br />
+          <br />
+          If the scan got a line wrong, type over its amount, or cross it out
+          with ✕ to leave it off the split — the total follows the items,
+          keeping tax and tip where they are, and ↺ on the crossed-out row brings
+          it back. Type over the total instead to pin it to what the
+          paper says.
         </div>
       </div>
 

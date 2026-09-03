@@ -184,3 +184,40 @@ entries (`entry is voided` — unvoid it first, since editing one would change
 what the eventual unvoid restores). Both use the same chain-parity rule as
 D13. Migration 0002 must be applied by hand (`wrangler d1 migrations apply
 tally --remote`); CI does not run migrations.
+
+## D15. The confirm screen's items are editable, and the total follows them
+
+The mockup's confirm screen treats the scan as final: rows can be assigned
+and an item the scan missed can be added, but nothing already on the list can
+be repriced or taken off it, and the total is a fixed number the extra line
+absorbs changes against. A scan that invents a line, doubles one, or misreads
+a price therefore had no fix short of cancelling and splitting by percentage.
+
+Each row now carries an editable amount and a ✕. Crossing a row out does NOT
+delete it: it stays in place, greyed and struck through, reading "Not on this
+split", with ↺ in the ✕'s spot — the same toggle in the same box (a wider
+text control would slide every amount sideways as rows are crossed out), so
+a mis-tap costs one tap, and what the scan actually read stays on screen instead of vanishing.
+Only `includedItems` reaches the subtotal, the split, the beat-confirm rule,
+and the posted items; the server needs no change, since a receipt-linked
+expense already replaces `receipt_items` with the confirmed set.
+
+The money model inverts to make that work. The screen used to store the
+TOTAL and derive `extra = total - subtotal`; it now stores the EXTRA and
+derives `total = subtotal + extra` (shared/items.ts). Crossing out an $8.75
+item drops the total by $8.75 and leaves tax and tip where they are, which is
+the reading a wrong scanned line calls for — the receipt was wrong, not just
+its itemization. Typing over the Total still pins it, by re-deriving the
+extra: the inverse, and the same gesture as before.
+
+Two consequences worth knowing:
+
+- **Adding an item now raises the total** instead of shrinking the extra.
+  One rule governs every item change, at the cost of the old add behavior;
+  the total remains one tap from being pinned to what the paper says.
+- **The derived total is clamped at zero.** A negative extra (a discount) can
+  exceed what the remaining items cost once rows are crossed out, and
+  `splitItems` throws on a negative total. Clamping keeps an over-crossed-out
+  receipt renderable; the extra line then shows `split.extra_cents` rather
+  than the held value, so the screen never displays a number the split math
+  did not use.

@@ -944,3 +944,167 @@ describe("POST /api/ledgers/:id/expenses/:expenseId/payer — swapping who paid"
     expect(res.status).toBe(404);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Date amendment — the second in-place edit, same guards as the payer swap
+// ---------------------------------------------------------------------------
+
+describe("POST /api/ledgers/:id/expenses/:expenseId/date — correcting when it happened", () => {
+  it("moves the entry through the ledger and rewrites the running balances it passes", async () => {
+    const first = expenseBody({ occurred_on: "2026-08-01", merchant: "Cafe", other_share_cents: 700 });
+    const second = expenseBody({ occurred_on: "2026-08-02", merchant: "Market", payer: JORDAN, other_share_cents: 300 });
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, first)).status).toBe(201);
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, second)).status).toBe(201);
+
+    const before = await getDetail(ledgerId, ALEX);
+    expect(before.entries.map((e) => e.id)).toEqual([first["id"], second["id"]]);
+    expect(before.entries.map((e) => e.running_cents)).toEqual([700, 400]);
+
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${first["id"]}/date`, ALEX, {
+      occurred_on: "2026-08-03",
+    });
+    expect(res.status).toBe(200);
+    expect((await entryOf(res)).occurred_on).toBe("2026-08-03");
+
+    const after = await getDetail(ledgerId, ALEX);
+    expect(after.entries.map((e) => e.id)).toEqual([second["id"], first["id"]]);
+    expect(after.entries.map((e) => e.running_cents)).toEqual([-300, 400]);
+    expect(await balanceOf(ledgerId, ALEX)).toBe(400); // the balance itself is untouched
+    expect(await countRows("expenses")).toBe(2); // in place: no new rows
+  });
+
+  it("stamps amended_at/amended_by with the caller, and repeating the same date writes nothing", async () => {
+    const body = expenseBody({ occurred_on: "2026-08-01" });
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+
+    const noop = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/date`, JORDAN, {
+      occurred_on: "2026-08-01",
+    });
+    expect(noop.status).toBe(200);
+    expect((await entryOf(noop)).expense?.amended_at).toBeNull();
+
+    const moved = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/date`, JORDAN, {
+      occurred_on: "2026-07-30",
+    });
+    expect(moved.status).toBe(200);
+    const stamped = await entryOf(moved);
+    expect(stamped.occurred_on).toBe("2026-07-30");
+    expect(stamped.expense?.amended_by).toBe(JORDAN);
+    expect(stamped.expense?.amended_at).toBeGreaterThan(0);
+  });
+
+  it("a linked receipt's purchased_on follows the entry", async () => {
+    const receiptId = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO receipts (id, ledger_id, sha256, status, created_at) VALUES (?1, ?2, ?3, 'needs_review', ?4)",
+    )
+      .bind(receiptId, ledgerId, crypto.randomUUID(), Date.now())
+      .run();
+    const body = {
+      id: crypto.randomUUID(),
+      occurred_on: "2026-08-01",
+      merchant: "Xian Famous Foods",
+      total_cents: 1000,
+      payer: ALEX,
+      method: "items",
+      receipt_id: receiptId,
+      items: [{ label: "Lamb Burger", price_cents: 1000, assigned_to: "half" }],
+    };
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${body.id}/date`, ALEX, {
+      occurred_on: "2026-07-28",
+    });
+    expect(res.status).toBe(200);
+    const row = await env.DB.prepare("SELECT purchased_on FROM receipts WHERE id = ?1")
+      .bind(receiptId)
+      .first<{ purchased_on: string }>();
+    expect(row?.purchased_on).toBe("2026-07-28");
+  });
+
+  it("rejects a malformed date => 400, and the entry keeps its date", async () => {
+    const body = expenseBody({ occurred_on: "2026-08-01" });
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/date`, ALEX, {
+      occurred_on: "2026-02-30",
+    });
+    expect(res.status).toBe(400);
+    const row = await env.DB.prepare("SELECT occurred_on FROM expenses WHERE id = ?1")
+      .bind(body["id"])
+      .first<{ occurred_on: string }>();
+    expect(row?.occurred_on).toBe("2026-08-01");
+  });
+
+  it("refuses a void row => 409, nothing changed", async () => {
+    const body = expenseBody();
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+    const voidBody = { id: crypto.randomUUID(), occurred_on: "2026-08-03" };
+    expect(
+      (await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/void`, ALEX, voidBody)).status,
+    ).toBe(201);
+
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${voidBody.id}/date`, ALEX, {
+      occurred_on: "2026-08-05",
+    });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as ErrorResponse).error).toBe("cannot change the date of a void");
+  });
+
+  it("refuses a currently-voided entry => 409, but allows it again once unvoided", async () => {
+    const body = expenseBody({ occurred_on: "2026-08-01" });
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+    const voidBody = { id: crypto.randomUUID(), occurred_on: "2026-08-03" };
+    expect(
+      (await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/void`, ALEX, voidBody)).status,
+    ).toBe(201);
+
+    const blocked = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/date`, ALEX, {
+      occurred_on: "2026-08-05",
+    });
+    expect(blocked.status).toBe(409);
+    expect(((await blocked.json()) as ErrorResponse).error).toBe("entry is voided");
+
+    expect(
+      (
+        await post(`/api/ledgers/${ledgerId}/expenses/${voidBody.id}/void`, ALEX, {
+          id: crypto.randomUUID(),
+          occurred_on: "2026-08-04",
+        })
+      ).status,
+    ).toBe(201);
+    const allowed = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/date`, ALEX, {
+      occurred_on: "2026-08-05",
+    });
+    expect(allowed.status).toBe(200);
+  });
+
+  it("an unknown expense id => 404", async () => {
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${crypto.randomUUID()}/date`, ALEX, {
+      occurred_on: "2026-08-05",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("non-member caller => 404, and the date is untouched", async () => {
+    const body = expenseBody({ occurred_on: "2026-08-01" });
+    expect((await post(`/api/ledgers/${ledgerId}/expenses`, ALEX, body)).status).toBe(201);
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${body["id"]}/date`, OUTSIDER, {
+      occurred_on: "2026-08-05",
+    });
+    expect(res.status).toBe(404);
+    const row = await env.DB.prepare("SELECT occurred_on FROM expenses WHERE id = ?1")
+      .bind(body["id"])
+      .first<{ occurred_on: string }>();
+    expect(row?.occurred_on).toBe("2026-08-01");
+  });
+
+  it("an expense in another ledger => 404, even for a member of both", async () => {
+    const otherLedger = await insertLedger(ALEX, SAM);
+    const foreign = expenseBody({ occurred_on: "2026-08-01" });
+    expect((await post(`/api/ledgers/${otherLedger}/expenses`, ALEX, foreign)).status).toBe(201);
+    const res = await post(`/api/ledgers/${ledgerId}/expenses/${foreign["id"]}/date`, ALEX, {
+      occurred_on: "2026-08-05",
+    });
+    expect(res.status).toBe(404);
+  });
+});

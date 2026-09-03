@@ -161,8 +161,9 @@ two extra ledger rows every time, which is exactly the noise voids were
 already generating. So `POST /expenses/:id/payer` updates `payer` and
 `other_share_cents` on the existing row. The row is not silent about it:
 migration 0002 adds nullable `amended_at`/`amended_by`, stamped with the
-CALLER (not the new payer), and the detail screen prints "Payer changed by
-you on Aug 13, 2026" so the other member can see the entry was edited.
+CALLER (not the new payer), and the detail screen prints "Edited by you on
+Aug 13, 2026" so the other member can see the entry was edited. (That line
+named the payer until D16 gave the stamp a second writer.)
 
 The body names the TARGET payer rather than requesting a "swap", so a retry
 is a no-op instead of flipping twice; naming the payer a row already has
@@ -221,3 +222,36 @@ Two consequences worth knowing:
   receipt renderable; the extra line then shows `split.extra_cents` rather
   than the held value, so the screen never displays a number the split math
   did not use.
+
+## D16. The date is editable after the fact, and re-dating reorders the ledger
+
+The date was correctable only in the moment: the confirm screen offers a date
+field, and once the entry was posted the number was frozen. That is backwards
+from how receipts actually arrive — a photo taken on Sunday of Friday's
+dinner is posted with the scan's guess or with today, and the mistake is
+noticed later, from the ledger, which is precisely where there was no way to
+fix it. `POST /expenses/:id/date` is therefore the SECOND in-place edit, and
+it deliberately copies D14 rather than inventing a second vocabulary: the
+body names the target date (so a retry cannot walk an entry down the
+calendar), naming the date a row already has writes nothing and stamps
+nothing, and it refuses voids (`cannot change the date of a void`) and
+currently-voided entries (`entry is voided`) under the same chain-parity rule
+as D13. Both routes now share one `isVoided` helper instead of two copies of
+the recursive CTE. No new migration: the D14 stamp columns already mean "this
+row was changed, and by whom", so the detail screen's amendment line drops
+its claim about the payer and reads "Edited by …".
+
+Two consequences worth knowing:
+
+- **Re-dating moves the row through the ledger.** `ledger_entries` orders by
+  `(occurred_on, created_at, id)`, so a corrected date rewrites the running
+  balance of every row it passes. The balance itself does not move — the same
+  deltas summed in a different order — but a member watching the running
+  column will see numbers change on entries they did not touch.
+- **A linked receipt's `purchased_on` follows in the same transaction.** The
+  items post stamps the expense and its receipt with one date; a correction
+  that moved only the expense would quietly split them apart.
+
+Any valid date is allowed, including a future one — the same latitude the
+confirm screen already gives, since a receipt dated wrong by the scanner is
+more common than a member deliberately post-dating an entry.

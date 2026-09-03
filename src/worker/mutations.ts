@@ -26,6 +26,24 @@ async function entryResponse(
   return entry;
 }
 
+/** Is this entry currently voided? Live state is the PARITY of the reversal
+ *  chain hanging off it: one reversal takes it away, a reversal of that
+ *  reversal puts it back. Same rule the client uses (shared/voids.ts). */
+async function isVoided(db: D1Database, expenseId: string): Promise<boolean> {
+  const chain = await db
+    .prepare(
+      `WITH RECURSIVE down(id, depth) AS (
+         SELECT id, 0 FROM expenses WHERE id = ?1
+         UNION ALL
+         SELECT e.id, down.depth + 1 FROM expenses e JOIN down ON e.reverses_id = down.id
+       )
+       SELECT MAX(depth) AS depth FROM down`,
+    )
+    .bind(expenseId)
+    .first<{ depth: number }>();
+  return (chain?.depth ?? 0) % 2 === 1;
+}
+
 export function registerMutations(app: Hono<AppContext>): void {
   app.onError((err, c) => {
     if (err instanceof ValidationError) {
@@ -414,19 +432,8 @@ export function registerMutations(app: Hono<AppContext>): void {
     }
 
     // Voided entries are off limits until they're put back — editing one
-    // would quietly change what the eventual unvoid restores. Live state is
-    // the parity of the reversal chain, same rule the client uses.
-    const chain = await c.env.DB.prepare(
-      `WITH RECURSIVE down(id, depth) AS (
-         SELECT id, 0 FROM expenses WHERE id = ?1
-         UNION ALL
-         SELECT e.id, down.depth + 1 FROM expenses e JOIN down ON e.reverses_id = down.id
-       )
-       SELECT MAX(depth) AS depth FROM down`,
-    )
-      .bind(expense.id)
-      .first<{ depth: number }>();
-    if ((chain?.depth ?? 0) % 2 === 1) {
+    // would quietly change what the eventual unvoid restores.
+    if (await isVoided(c.env.DB, expense.id)) {
       return c.json({ error: "entry is voided" }, 409);
     }
 
@@ -471,6 +478,68 @@ export function registerMutations(app: Hono<AppContext>): void {
     )
       .bind(expense.id, ledger.id, payer, otherShare, Date.now(), email)
       .run();
+
+    return c.json({ entry: await entryResponse(c.env.DB, ledger, email, expense.id) }, 200);
+  });
+
+  // The second in-place edit: correcting WHEN an entry happened. Same shape
+  // as the payer amendment — the body names the target date rather than a
+  // nudge, so a retry can't walk the entry down the calendar — and the same
+  // guards, since re-dating a voided entry would quietly change what the
+  // eventual unvoid restores.
+  //
+  // Moving a date reorders the row within the ledger and rewrites the
+  // running balance of every row it passes. The balance itself doesn't move:
+  // the same deltas are summed in a different order.
+  app.post("/api/ledgers/:id/expenses/:expenseId/date", async (c) => {
+    const email = c.get("email");
+    const ledger = await ledgerForMember(c.env.DB, c.req.param("id"), email);
+    if (!ledger) return c.json({ error: "not found" }, 404);
+
+    const body = await readJson(c.req.raw);
+    const occurredOn = assertDate(body.occurred_on, "occurred_on");
+
+    const expense = await c.env.DB.prepare(
+      `SELECT id, occurred_on, receipt_id, reverses_id
+       FROM expenses WHERE id = ?1 AND ledger_id = ?2`,
+    )
+      .bind(c.req.param("expenseId"), ledger.id)
+      .first<{
+        id: string;
+        occurred_on: string;
+        receipt_id: string | null;
+        reverses_id: string | null;
+      }>();
+    if (!expense) return c.json({ error: "not found" }, 404);
+    if (expense.reverses_id) {
+      return c.json({ error: "cannot change the date of a void" }, 409);
+    }
+    if (await isVoided(c.env.DB, expense.id)) {
+      return c.json({ error: "entry is voided" }, 409);
+    }
+
+    if (expense.occurred_on === occurredOn) {
+      // Already there: no write, no stamp.
+      return c.json({ entry: await entryResponse(c.env.DB, ledger, email, expense.id) }, 200);
+    }
+
+    // The receipt records the same purchase, so its date follows in the same
+    // transaction — the items post stamps the two together, and a correction
+    // shouldn't pull them apart.
+    const statements = [
+      c.env.DB.prepare(
+        `UPDATE expenses SET occurred_on = ?3, amended_at = ?4, amended_by = ?5
+         WHERE id = ?1 AND ledger_id = ?2`,
+      ).bind(expense.id, ledger.id, occurredOn, Date.now(), email),
+    ];
+    if (expense.receipt_id) {
+      statements.push(
+        c.env.DB.prepare(
+          "UPDATE receipts SET purchased_on = ?2 WHERE id = ?1 AND ledger_id = ?3",
+        ).bind(expense.receipt_id, occurredOn, ledger.id),
+      );
+    }
+    await c.env.DB.batch(statements);
 
     return c.json({ entry: await entryResponse(c.env.DB, ledger, email, expense.id) }, 200);
   });

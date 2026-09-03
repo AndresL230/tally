@@ -7,7 +7,7 @@ import { chainDepth, chainTip, isVoided as chainVoided, voidChain } from "../../
 import { divRoundHalfUp, splitItems, type SplitResult } from "../../shared/money";
 import { longDate, money, moneyAbs, moneySigned } from "../../shared/format";
 import { ARCHIVO, CARD, INK, MONO, MUTED_1, MUTED_2, MUTED_3, SERIF, halfBg, type Colors } from "../theme";
-import { isoDay } from "../util";
+import { isISODate, isoDay } from "../util";
 
 // Port of the mockup's entry detail (sc-if isDetail): delta hero in the
 // serif face, readonly item list with the spine/tint vocabulary, extra
@@ -26,6 +26,8 @@ export interface DetailScreenProps {
   onVoid: (targetId: string) => void;
   /** Swaps who paid, in place. Names the target payer, never "the other one". */
   onSetPayer: (entryId: string, payer: string) => void;
+  /** Corrects when the entry happened, in place. Names the target date. */
+  onSetDate: (entryId: string, occurredOn: string) => void;
 }
 
 export function DetailScreen({
@@ -36,6 +38,7 @@ export function DetailScreen({
   onBack,
   onVoid,
   onSetPayer,
+  onSetDate,
 }: DetailScreenProps) {
   const [armed, setArmed] = useState(false);
   const { viewer, ledger } = detail;
@@ -287,16 +290,64 @@ export function DetailScreen({
           </div>
         )}
 
-        {/* Who paid, swappable in place — the ledger's one edit. Single tap,
-            no arming: unlike a void it undoes itself with another tap. Hidden
-            on voids and voided entries, which the server refuses anyway. */}
+        {/* The two in-place edits: when it happened, and who paid. Single
+            tap, no arming — unlike a void, either one undoes itself with
+            another tap. Hidden on voids and voided entries, which the server
+            refuses anyway. Moving the date reorders the ledger; the balance
+            it adds up to doesn't change. */}
         {ex && !isReversal && !isVoided && (
           <>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                marginTop: 26,
+                height: 52,
+                padding: "0 14px",
+                borderRadius: 14,
+                border: "1px solid rgba(0,0,0,.18)",
+                cursor: "pointer",
+              }}
+            >
+              <span
+                style={{
+                  font: `600 9.5px ${ARCHIVO}`,
+                  letterSpacing: ".14em",
+                  textTransform: "uppercase",
+                  color: MUTED_3,
+                }}
+              >
+                Date
+              </span>
+              <input
+                type="date"
+                value={entry.occurred_on}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  // A half-typed date is not a correction; only commit a
+                  // whole one, and only when it actually moves the entry.
+                  if (isISODate(next) && next !== entry.occurred_on) {
+                    onSetDate(entry.id, next);
+                  }
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  border: 0,
+                  background: "transparent",
+                  color: INK,
+                  font: `500 15px ${MONO}`,
+                  textAlign: "right",
+                  cursor: "pointer",
+                }}
+              />
+            </label>
             <button
               onClick={() => onSetPayer(entry.id, ex.payer === viewer ? friendEmail : viewer)}
               style={{
                 width: "100%",
-                marginTop: 26,
+                marginTop: 12,
                 height: 52,
                 borderRadius: 14,
                 border: "1px solid rgba(0,0,0,.18)",
@@ -310,7 +361,7 @@ export function DetailScreen({
             </button>
             {ex.amended_at && (
               <div style={{ marginTop: 10, font: `400 12.5px ${MONO}`, color: MUTED_3 }}>
-                Payer changed by {ex.amended_by === viewer ? "you" : F} on {longDate(isoDay(ex.amended_at))}.
+                Edited by {ex.amended_by === viewer ? "you" : F} on {longDate(isoDay(ex.amended_at))}.
               </div>
             )}
           </>

@@ -98,6 +98,7 @@ function detailState(id: string, label: string, d: LedgerDetail, entryId: string
         onBack={log("detail back")}
         onVoid={log("void entry")}
         onSetPayer={log("set payer")}
+        onSetDate={log("set date")}
       />
     ),
   };

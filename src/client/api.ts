@@ -152,6 +152,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ payer }),
     }),
+  /** Correct when an entry happened, in place. Names the TARGET date, so a
+   *  retry can't walk it down the calendar; the server stamps the amendment
+   *  and moves the linked receipt's purchase date with it. */
+  setDate: (ledgerId: string, expenseId: string, occurredOn: string) =>
+    request<{ entry: ApiEntry }>(`/api/ledgers/${ledgerId}/expenses/${expenseId}/date`, {
+      method: "POST",
+      body: JSON.stringify({ occurred_on: occurredOn }),
+    }),
   voidExpense: (ledgerId: string, expenseId: string, body: VoidExpenseBody) =>
     request<{ entry: ApiEntry }>(`/api/ledgers/${ledgerId}/expenses/${expenseId}/void`, {
       method: "POST",

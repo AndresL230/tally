@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext } from "./env";
-import { getUser, registerAuth, requireUser } from "./auth";
+import { getUser, registerAuth, requireUser, sameOriginOnly } from "./auth";
 import { ledgerDetail, ledgerForMember, listLedgers } from "./db";
 import { registerMutations } from "./mutations";
 import { registerReceipts } from "./receipts";
@@ -8,6 +8,12 @@ import { registerPrefs } from "./prefs";
 import { isAdmin, registerAdmin } from "./admin";
 
 const app = new Hono<AppContext>();
+
+// The Origin check goes FIRST, ahead of the auth routes: they are exactly
+// what a cross-site page would target (login-CSRF — signing the victim into
+// the attacker's account), and middleware registered after a route never
+// runs for it.
+app.use("/api/*", sameOriginOnly);
 
 // Order matters: the two routes that MINT a session are registered first,
 // so the session check below never sees them (Hono runs a matching route

@@ -42,10 +42,13 @@ export async function getUser(request: Request, env: Env): Promise<{ email: stri
   return row ? { email: row.email } : null;
 }
 
-/** Hono middleware: 401 unless the request carries a live session. */
-export const requireUser: MiddlewareHandler<AppContext> = async (c, next) => {
-  // CSRF, second layer behind SameSite=Lax: a browser always sends Origin on
-  // cross-site non-GET requests, and it must be our own origin.
+/**
+ * CSRF, second layer behind SameSite=Lax: a browser always sends Origin on
+ * cross-site non-GET requests, and it must be our own origin. This guards
+ * the session-minting routes too, not just the authenticated ones — a
+ * cross-site page posting to /api/auth/verify is login-CSRF.
+ */
+export const sameOriginOnly: MiddlewareHandler<AppContext> = async (c, next) => {
   const method = c.req.method;
   if (method !== "GET" && method !== "HEAD") {
     const origin = c.req.header("Origin");
@@ -53,6 +56,11 @@ export const requireUser: MiddlewareHandler<AppContext> = async (c, next) => {
       return c.json({ error: "forbidden" }, 403);
     }
   }
+  await next();
+};
+
+/** Hono middleware: 401 unless the request carries a live session. */
+export const requireUser: MiddlewareHandler<AppContext> = async (c, next) => {
   const token = tokenFrom(c.req.raw);
   const row = token ? await findSession(c.env.DB, token) : null;
   if (!token || !row) return c.json({ error: "unauthenticated" }, 401);

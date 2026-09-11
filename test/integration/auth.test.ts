@@ -72,6 +72,24 @@ describe("CSRF: Origin check on non-GET /api requests", () => {
     expect(res.status).toBe(403);
   });
 
+  it("rejects cross-origin POSTs to the session-minting routes (login-CSRF)", async () => {
+    installMailPatch();
+    try {
+      await insertLedger(ALEX, "jordan@example.com"); // ALEX would otherwise be allowed
+      const evil = { "Content-Type": "application/json", Origin: "https://evil.example" };
+      const code = await post("/api/auth/code", { email: ALEX }, { headers: evil });
+      expect(code.status).toBe(403);
+      expect(await code.json()).toEqual({ error: "forbidden" });
+      const verify = await post("/api/auth/verify", { email: ALEX, code: "111111" }, { headers: evil });
+      expect(verify.status).toBe(403);
+      expect(outbox).toHaveLength(0);
+      const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM auth_codes").first<{ n: number }>();
+      expect(n!.n).toBe(0);
+    } finally {
+      removeMailPatch();
+    }
+  });
+
   it("allows same-origin and header-less POSTs", async () => {
     const body = () => JSON.stringify({ id: crypto.randomUUID(), friend_email: "jordan@example.com" });
     const same = await authedFetch("/api/ledgers", ALEX, {

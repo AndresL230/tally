@@ -365,11 +365,11 @@ describe("who may request a code (invite-only by default)", () => {
     expect((await post("/api/auth/code", { email: "Admin@Example.com" })).status).toBe(200);
   });
 
-  it("allows anyone with a users row", async () => {
+  it("a users row alone no longer grants access", async () => {
     await env.DB.prepare("INSERT INTO users (email, display_name, accent_color, created_at) VALUES (?1, 'S', NULL, 1)")
       .bind(STRANGER)
       .run();
-    expect((await post("/api/auth/code", { email: STRANGER })).status).toBe(200);
+    expect((await post("/api/auth/code", { email: STRANGER })).status).toBe(403);
   });
 
   it("allows a member of any ledger, on either side", async () => {

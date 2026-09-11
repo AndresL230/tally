@@ -38,6 +38,19 @@ export function registerAdmin(app: Hono<AppContext>): void {
       throw new ValidationError("mode must be 'invite' or 'open'");
     }
     await setSignupMode(c.env.DB, body.mode);
+    if (body.mode === "invite") {
+      // Closing the door means closing it: strangers who signed in while
+      // sign-up was open lose their sessions, so open mode is reversible.
+      // Anyone with a ledger or an invite keeps theirs, and so does the owner.
+      await c.env.DB.prepare(
+        `DELETE FROM sessions
+         WHERE lower(email) != lower(?1)
+           AND NOT EXISTS (SELECT 1 FROM ledgers l WHERE l.person_a = sessions.email OR l.person_b = sessions.email)
+           AND NOT EXISTS (SELECT 1 FROM invites i WHERE i.email = sessions.email)`,
+      )
+        .bind(c.env.ADMIN_EMAIL ?? "")
+        .run();
+    }
     return c.json({ signup_mode: body.mode });
   });
 

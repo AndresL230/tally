@@ -115,16 +115,17 @@ export const GLOBAL_HOURLY = 30;
 const HOUR_MS = 60 * 60 * 1000;
 
 /**
- * Invite-only unless the owner opened sign-up: the owner, anyone with a
- * users row, any ledger member, or an explicit invite may request a code.
+ * Invite-only unless the owner opened sign-up: the owner, any ledger
+ * member, or an explicit invite may request a code. A `users` row is NOT a
+ * source — otherwise everyone who signed in while sign-up was open would
+ * keep their access forever, and closing it again would do nothing.
  */
 export async function mayRequestCode(env: Env, email: string): Promise<boolean> {
   if (env.ADMIN_EMAIL && env.ADMIN_EMAIL.toLowerCase() === email) return true;
   if ((await getSignupMode(env.DB)) === "open") return true;
   const known = await env.DB.prepare(
     `SELECT 1 AS ok
-     WHERE EXISTS (SELECT 1 FROM users WHERE email = ?1)
-        OR EXISTS (SELECT 1 FROM invites WHERE email = ?1)
+     WHERE EXISTS (SELECT 1 FROM invites WHERE email = ?1)
         OR EXISTS (SELECT 1 FROM ledgers WHERE person_a = ?1 OR person_b = ?1)`,
   )
     .bind(email)

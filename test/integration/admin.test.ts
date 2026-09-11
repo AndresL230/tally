@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SELF, env } from "cloudflare:test";
-import { authedFetch, authedJson } from "../helpers/auth";
-import { ALEX, JORDAN } from "../helpers/fixtures";
-import { installMailPatch, outbox, removeMailPatch } from "../helpers/mail";
+import { authedFetch, authedJson, sessionCookieFor } from "../helpers/auth";
+import { ALEX, JORDAN, insertLedger } from "../helpers/fixtures";
+import { installMailPatch, lastCodeFor, outbox, removeMailPatch } from "../helpers/mail";
 import type { AdminState } from "../../src/shared/types";
 
 const ADMIN = "admin@example.com"; // vitest.config.ts binds ADMIN_EMAIL
@@ -46,6 +46,35 @@ describe("admin routes", () => {
     expect((await authedJson<AdminState>("/api/admin", ADMIN)).signup_mode).toBe("open");
     expect((await json("PUT", "/api/admin/signup-mode", ADMIN, { mode: "everyone" })).status).toBe(400);
     expect((await json("PUT", "/api/admin/signup-mode", ADMIN, { mode: "invite" })).status).toBe(200);
+  });
+
+  it("switching back to invite-only signs out whoever open mode let in", async () => {
+    const STRANGER = "stranger@example.com";
+    const me = (cookie: string) => SELF.fetch("https://tally.test/api/me", { headers: { Cookie: cookie } });
+    const anon = (path: string, body: unknown) =>
+      SELF.fetch(`https://tally.test${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+    await insertLedger(ALEX, JORDAN);
+    const alexCookie = await sessionCookieFor(ALEX);
+    const ownerCookie = await sessionCookieFor(ADMIN);
+    expect((await json("PUT", "/api/admin/signup-mode", ADMIN, { mode: "open" })).status).toBe(200);
+
+    // A stranger walks in through the open door.
+    expect((await anon("/api/auth/code", { email: STRANGER })).status).toBe(200);
+    const verified = await anon("/api/auth/verify", { email: STRANGER, code: lastCodeFor(STRANGER) });
+    expect(verified.status).toBe(200);
+    const strangerCookie = /tally_session=[^;]+/.exec(verified.headers.get("set-cookie") ?? "")![0];
+    expect((await me(strangerCookie)).status).toBe(200);
+
+    // The owner closes it again: the stranger is out, members and the owner stay.
+    expect((await json("PUT", "/api/admin/signup-mode", ADMIN, { mode: "invite" })).status).toBe(200);
+    expect((await me(strangerCookie)).status).toBe(401);
+    expect((await me(alexCookie)).status).toBe(200);
+    expect((await me(ownerCookie)).status).toBe(200);
   });
 
   it("invites: inserts, emails the owner variant, lists as pending, and is idempotent", async () => {

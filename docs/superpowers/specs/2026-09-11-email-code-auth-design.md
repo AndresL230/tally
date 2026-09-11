@@ -34,10 +34,11 @@ so the design leans on D1 and Workers freely.
 ## Data — `migrations/0003_auth.sql`
 
 ```sql
--- Explicit invites. "May sign in" is the union of: ADMIN_EMAIL, a users row,
--- membership in any ledger, or a row here. Creating a ledger with a friend's
--- email is therefore already an invite; this table is for inviting someone
--- who has no ledger yet.
+-- Explicit invites. "May sign in" is the union of: ADMIN_EMAIL, membership
+-- in any ledger, or a row here. Creating a ledger with a friend's email is
+-- therefore already an invite; this table is for inviting someone who has no
+-- ledger yet. Switching sign-up back to invite-only deletes the sessions of
+-- anyone outside that union, so open mode is reversible.
 CREATE TABLE invites (
   email      TEXT PRIMARY KEY,
   invited_by TEXT NOT NULL,
@@ -111,11 +112,12 @@ order is what exempts them, and a comment in `index.ts` says so.
    - per email: newest row < 60 s old → `429` with `retry_after` seconds
    - per email: ≤ 5 rows in the last hour → `429`
 3. Allowed? `signup_mode = 'open'` short-circuits to yes. Otherwise the email
-   must be `ADMIN_EMAIL`, or have a `users` row, or appear as `person_a`/`b`
-   in any ledger, or have an `invites` row. Not allowed →
-   `403 { error: "not invited" }`. This is deliberately explicit rather than
-   an enumeration-safe "if an account exists": the app is private and the
-   owner chose gatekeeping, not secrecy.
+   must be `ADMIN_EMAIL`, or appear as `person_a`/`b` in any ledger, or have
+   an `invites` row. Not allowed → `403 { error: "not invited" }`. This is
+   deliberately explicit rather than an enumeration-safe "if an account
+   exists": the app is private and the owner chose gatekeeping, not secrecy.
+   Switching sign-up back to invite-only also revokes the sessions of
+   everyone outside that list, so open mode can be undone.
 4. Generate a 6-digit code from `crypto.getRandomValues` with rejection
    sampling (all 10⁶ values equally likely). Insert the row; older rows for
    the email are implicitly superseded.

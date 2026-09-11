@@ -75,10 +75,11 @@ There are no passwords and no third-party identity provider.
   `HttpOnly; SameSite=Lax; Secure` cookie, its sha256 as the D1 row.
   90 days, extended on use; `POST /api/auth/signout` deletes the row.
 - **Who can sign in**: invite-only by default — the owner (`ADMIN_EMAIL`),
-  anyone with an account, any ledger member, or an explicit invite. The
-  owner can invite by email or open sign-up to anyone from the app's
-  "Owner settings" screen. Creating a ledger with someone's email is itself
-  an invite (they get an email).
+  any ledger member, or an explicit invite. The owner can invite by email or
+  open sign-up to anyone from the app's "Owner settings" screen. Creating a
+  ledger with someone's email is itself an invite (they get an email).
+  Switching back to invite-only signs out anyone who is neither a ledger
+  member nor invited, so opening sign-up is reversible.
 - **Mail** (`src/worker/mailer.ts`): Resend, from `MAIL_FROM`. Set the
   `RESEND_API_KEY` secret and verify the sending domain in Resend
   (its DKIM/SPF records go in the Cloudflare zone). Without the key the

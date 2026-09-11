@@ -29,7 +29,7 @@ const LABEL: CSSProperties = {
 
 const HELPER: Record<SignupMode, string> = {
   invite: "Only people you or a ledger has added can sign in.",
-  open: "Anyone can sign in and use your scan budget. Switch back when you're done.",
+  open: "Anyone can sign in and use your scan budget. Switch back when you're done — people who started a ledger keep their access.",
 };
 
 type InviteState = { name: "idle" } | { name: "sending" } | { name: "sent"; email: string } | { name: "error"; message: string };

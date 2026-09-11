@@ -110,7 +110,8 @@ order is what exempts them, and a comment in `index.ts` says so.
    - global: ≤ 30 rows created in the last hour (any mode; protects the mail
      quota) → `429 { error: "slow down", retry_after }`
    - per email: newest row < 60 s old → `429` with `retry_after` seconds
-   - per email: ≤ 5 rows in the last hour → `429`
+   - per email: ≤ 3 rows in the last 5 minutes → `429` (so the longest wait
+     is five minutes)
 3. Allowed? `signup_mode = 'open'` short-circuits to yes. Otherwise the email
    must be `ADMIN_EMAIL`, or appear as `person_a`/`b` in any ledger, or have
    an `invites` row. Not allowed → `403 { error: "not invited" }`. This is

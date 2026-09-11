@@ -70,7 +70,8 @@ There are no passwords and no third-party identity provider.
 - **Codes** (`src/worker/auth.ts`): `POST /api/auth/code` emails a code
   (10 minutes, single use, five wrong tries and it's dead); `POST
   /api/auth/verify` exchanges it for a session cookie. Only the code's hash
-  is stored. Requests are rate-limited per address and globally.
+  is stored. Requests are rate-limited: 60 s between codes for one address,
+  3 codes per address per 5 minutes, 30 across everyone per hour.
 - **Sessions** (`src/worker/session.ts`): a 256-bit token in an
   `HttpOnly; SameSite=Lax; Secure` cookie, its sha256 as the D1 row.
   90 days, extended on use; `POST /api/auth/signout` deletes the row.

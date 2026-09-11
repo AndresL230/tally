@@ -113,7 +113,10 @@ function normalizeEmail(value: unknown): string {
 }
 
 export const RESEND_COOLDOWN_MS = 60 * 1000;
-export const PER_EMAIL_HOURLY = 5;
+// Per address: a short window, so the longest anyone is ever told to wait
+// is five minutes; the global hourly cap is what protects the mail quota.
+export const PER_EMAIL_WINDOW_MS = 5 * 60 * 1000;
+export const PER_EMAIL_PER_WINDOW = 3;
 export const GLOBAL_HOURLY = 30;
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -144,7 +147,7 @@ function secondsUntil(t: number, now: number): number {
   return Math.max(1, Math.ceil((t - now) / 1000));
 }
 
-/** Global cap, then per-email cooldown, then per-email hourly cap. */
+/** Global hourly cap, then per-email cooldown, then per-email window cap. */
 async function rateLimited(db: D1Database, email: string, now: number): Promise<Limited | null> {
   const since = now - HOUR_MS;
   const all = await db
@@ -159,13 +162,13 @@ async function rateLimited(db: D1Database, email: string, now: number): Promise<
       `SELECT COUNT(*) AS n, MIN(created_at) AS oldest, MAX(created_at) AS newest
        FROM auth_codes WHERE email = ?1 AND created_at > ?2`,
     )
-    .bind(email, since)
+    .bind(email, now - PER_EMAIL_WINDOW_MS)
     .first<{ n: number; oldest: number | null; newest: number | null }>();
   if (mine && mine.newest !== null && now - mine.newest < RESEND_COOLDOWN_MS) {
     return { retryAfter: secondsUntil(mine.newest + RESEND_COOLDOWN_MS, now) };
   }
-  if (mine && mine.n >= PER_EMAIL_HOURLY) {
-    return { retryAfter: secondsUntil((mine.oldest ?? now) + HOUR_MS, now) };
+  if (mine && mine.n >= PER_EMAIL_PER_WINDOW) {
+    return { retryAfter: secondsUntil((mine.oldest ?? now) + PER_EMAIL_WINDOW_MS, now) };
   }
   return null;
 }

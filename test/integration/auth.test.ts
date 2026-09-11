@@ -3,7 +3,14 @@ import { SELF, env } from "cloudflare:test";
 import { authedFetch, sessionCookieFor } from "../helpers/auth";
 import { ALEX, insertCode, insertLedger } from "../helpers/fixtures";
 import { failNextSend, installMailPatch, lastCodeFor, outbox, removeMailPatch } from "../helpers/mail";
-import { CODE_TTL_MS, GLOBAL_HOURLY, MAX_ATTEMPTS, PER_EMAIL_HOURLY, RESEND_COOLDOWN_MS } from "../../src/worker/auth";
+import {
+  CODE_TTL_MS,
+  GLOBAL_HOURLY,
+  MAX_ATTEMPTS,
+  PER_EMAIL_PER_WINDOW,
+  PER_EMAIL_WINDOW_MS,
+  RESEND_COOLDOWN_MS,
+} from "../../src/worker/auth";
 import { setSignupMode } from "../../src/worker/settings";
 import {
   RENEW_BELOW_MS,
@@ -424,15 +431,25 @@ describe("rate limits on /api/auth/code", () => {
     expect(outbox).toHaveLength(1);
   });
 
-  it("per-email hourly cap: the sixth code in an hour is refused even after the cooldown", async () => {
+  it("per-email window cap: the fourth code in five minutes is refused, for at most five minutes", async () => {
     const now = Date.now();
-    for (let i = 0; i < PER_EMAIL_HOURLY; i++) {
-      await insertCode(ALEX, "000000", { created_at: now - (i + 2) * 2 * 60 * 1000 });
+    // Three codes inside the window, the newest 90 s ago (past the cooldown).
+    for (let i = 0; i < PER_EMAIL_PER_WINDOW; i++) {
+      await insertCode(ALEX, "000000", { created_at: now - 90 * 1000 - i * 60 * 1000 });
     }
     const res = await post("/api/auth/code", { email: ALEX });
     expect(res.status).toBe(429);
     const body = (await res.json()) as { retry_after: number };
     expect(body.retry_after).toBeGreaterThan(RESEND_COOLDOWN_MS / 1000);
+    expect(body.retry_after).toBeLessThanOrEqual(PER_EMAIL_WINDOW_MS / 1000);
+  });
+
+  it("per-email window cap: codes older than the window don't count", async () => {
+    const now = Date.now();
+    for (let i = 0; i < PER_EMAIL_PER_WINDOW; i++) {
+      await insertCode(ALEX, "000000", { created_at: now - PER_EMAIL_WINDOW_MS - 1000 - i * 60 * 1000 });
+    }
+    expect((await post("/api/auth/code", { email: ALEX })).status).toBe(200);
   });
 
   it("global hourly cap protects the mail quota across all emails", async () => {

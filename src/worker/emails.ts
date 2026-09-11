@@ -61,7 +61,11 @@ export function signInCode(code: string): MailContent {
   };
 }
 
-export function invited(inviterName: string | null): MailContent {
+export function invited(rawInviterName: string | null): MailContent {
+  // A display name reaches the subject header and the plain-text body, so
+  // its line breaks go first — a CR or LF there is header injection.
+  const oneLine = rawInviterName?.replace(/[\r\n]+/g, " ").trim();
+  const inviterName = oneLine ? oneLine : null;
   const safe = inviterName ? escapeHtml(inviterName) : null;
   const heading = safe ? `${safe} started a ledger with you.` : "You've been invited to Tally.";
   const headingText = inviterName ? `${inviterName} started a ledger with you.` : "You've been invited to Tally.";

@@ -333,6 +333,19 @@ describe("POST /api/auth/signout", () => {
     const res = await SELF.fetch(`${ORIGIN}/api/auth/signout`, { method: "POST" });
     expect(res.status).toBe(401);
   });
+
+  it("does not renew a session it is signing out", async () => {
+    // Created 50 days ago => inside the renewal window, so the sliding
+    // renewal would otherwise append a fresh cookie over the cleared one.
+    const token = await createSession(env.DB, ALEX, Date.now() - 50 * 24 * 60 * 60 * 1000);
+    const cookie = `${SESSION_COOKIE}=${token}`;
+    const out = await SELF.fetch(`${ORIGIN}/api/auth/signout`, { method: "POST", headers: { Cookie: cookie } });
+    expect(out.status).toBe(204);
+    const cookies = out.headers.getSetCookie();
+    expect(cookies).toHaveLength(1);
+    expect(cookies[0]).toContain("Max-Age=0");
+    expect((await SELF.fetch(`${ORIGIN}/api/me`, { headers: { Cookie: cookie } })).status).toBe(401);
+  });
 });
 
 describe("GET /login", () => {

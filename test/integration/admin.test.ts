@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SELF, env } from "cloudflare:test";
 import { authedFetch, authedJson, sessionCookieFor } from "../helpers/auth";
 import { ALEX, JORDAN, insertLedger } from "../helpers/fixtures";
-import { installMailPatch, lastCodeFor, outbox, removeMailPatch } from "../helpers/mail";
+import { failNextSend, installMailPatch, lastCodeFor, outbox, removeMailPatch } from "../helpers/mail";
 import type { AdminState } from "../../src/shared/types";
 
 const ADMIN = "admin@example.com"; // vitest.config.ts binds ADMIN_EMAIL
@@ -107,6 +107,18 @@ describe("admin routes", () => {
     expect((await json("DELETE", `/api/admin/invites/${JORDAN}`, ADMIN)).status).toBe(204);
     expect((await authedJson<AdminState>("/api/admin", ADMIN)).pending).toEqual([]);
     expect((await json("DELETE", `/api/admin/invites/${JORDAN}`, ADMIN)).status).toBe(204); // idempotent
+  });
+
+  it("reports a mail failure as 502 and keeps the invite pending", async () => {
+    failNextSend(500);
+    const res = await json("POST", "/api/admin/invites", ADMIN, { email: JORDAN });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "couldn't send the email" });
+    const state = await authedJson<AdminState>("/api/admin", ADMIN);
+    expect(state.pending.map((p) => p.email)).toEqual([JORDAN]);
+    // Inviting again re-sends, and now it works.
+    expect((await json("POST", "/api/admin/invites", ADMIN, { email: JORDAN })).status).toBe(200);
+    expect(outbox).toHaveLength(1);
   });
 
   it("validates the invite email and refuses self-invites", async () => {

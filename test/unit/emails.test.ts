@@ -38,6 +38,13 @@ describe("invite email", () => {
     expect(m.html).toContain("You've been invited to Tally.");
   });
 
+  it("flattens line breaks in the inviter's name (header injection)", () => {
+    const m = invited("Mallory\r\nBcc: victim@example.com");
+    expect(m.subject).toBe("Mallory Bcc: victim@example.com started a ledger with you on Tally");
+    expect(m.subject).not.toMatch(/[\r\n]/);
+    expect(m.text).not.toContain("Mallory\r\n");
+  });
+
   it("links to /login exactly once and escapes the inviter's name", () => {
     const m = invited("<b>Mallory</b>");
     expect(m.html.match(/https:\/\/tally\.andresl\.dev\/login/g)?.length).toBe(1);

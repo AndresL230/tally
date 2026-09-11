@@ -66,6 +66,9 @@ export const requireUser: MiddlewareHandler<AppContext> = async (c, next) => {
   if (!token || !row) return c.json({ error: "unauthenticated" }, 401);
   c.set("email", row.email);
   await next();
+  // A handler that set a cookie has already decided what the browser should
+  // hold — sign-out just cleared it — so don't renew on top of it.
+  if (c.res.headers.has("Set-Cookie")) return;
   // Sliding renewal / hourly touch after the handler, so the response
   // carries the refreshed cookie when the row was extended.
   const renewed = await touchSession(c.env.DB, row);
@@ -178,12 +181,15 @@ export function registerAuth(app: Hono<AppContext>): void {
     const email = normalizeEmail(body.email);
     const now = Date.now();
     const db = c.env.DB;
-    // Housekeeping: dead codes are worthless after a day.
-    await db.prepare("DELETE FROM auth_codes WHERE created_at < ?1").bind(now - DAY_MS).run();
 
     const limited = await rateLimited(db, email, now);
     if (limited) return c.json({ error: "slow down", retry_after: limited.retryAfter }, 429);
     if (!(await mayRequestCode(c.env, email))) return c.json({ error: "not invited" }, 403);
+
+    // Housekeeping: dead codes are worthless after a day. It runs only once
+    // a request has earned a code, so a refused one — throttled, or a
+    // stranger who never trips the limits — costs reads and no write.
+    await db.prepare("DELETE FROM auth_codes WHERE created_at < ?1").bind(now - DAY_MS).run();
 
     const code = randomCode();
     const id = crypto.randomUUID();

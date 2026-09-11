@@ -155,7 +155,9 @@ export function SignInScreen({ desktop, onSignedIn }: SignInScreenProps) {
     </button>
   );
   const failureLine = failure && (
-    <div style={{ marginTop: 14, font: `400 14px ${ARCHIVO}`, lineHeight: 1.45, color: ERROR_INK }}>{failure}</div>
+    <div role="status" style={{ marginTop: 14, font: `400 14px ${ARCHIVO}`, lineHeight: 1.45, color: ERROR_INK }}>
+      {failure}
+    </div>
   );
 
   let content: React.ReactNode;
@@ -270,7 +272,10 @@ export function SignInScreen({ desktop, onSignedIn }: SignInScreenProps) {
               style={{ position: "absolute", inset: 0, opacity: 0, border: 0, font: `32px ${MONO}`, caretColor: "transparent" }}
             />
             {err?.kind === "wrong" && (
-              <div style={{ marginTop: 10, font: `400 14px ${ARCHIVO}`, lineHeight: 1.45, color: ERROR_INK }}>
+              <div
+                role="status"
+                style={{ marginTop: 10, font: `400 14px ${ARCHIVO}`, lineHeight: 1.45, color: ERROR_INK }}
+              >
                 {`That code isn't right. ${err.triesLeft} ${err.triesLeft === 1 ? "try" : "tries"} left.`}
               </div>
             )}

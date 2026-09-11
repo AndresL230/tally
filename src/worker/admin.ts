@@ -65,12 +65,19 @@ export function registerAdmin(app: Hono<AppContext>): void {
       .bind(email, c.get("email"), Date.now())
       .run();
     // Re-inviting re-sends: the row is idempotent, the email is the point.
-    await sendMail(c.env, { to: email, ...invited(null) });
+    // A send that fails is worth saying out loud — the row stays, so the
+    // owner can simply invite again once the mailer is back.
+    try {
+      await sendMail(c.env, { to: email, ...invited(null) });
+    } catch (err) {
+      console.error("invite mail failed", err);
+      return c.json({ error: "couldn't send the email" }, 502);
+    }
     return c.json({ email }, insert.meta.changes === 1 ? 201 : 200);
   });
 
   app.delete("/api/admin/invites/:email", async (c) => {
-    const email = decodeURIComponent(c.req.param("email")).toLowerCase();
+    const email = c.req.param("email").toLowerCase(); // Hono decodes params
     await c.env.DB.prepare("DELETE FROM invites WHERE email = ?1").bind(email).run();
     return c.body(null, 204);
   });

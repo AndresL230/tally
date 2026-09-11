@@ -39,7 +39,6 @@ drafts, never posts — a human confirms every entry.
 ```sh
 npm install
 npm run seed          # apply migrations + demo data into local D1
-cp .dev.vars.example .dev.vars   # local identity (alex@example.com)
 npm run build         # build the client once
 npm run dev           # wrangler dev on http://127.0.0.1:8787
 ```
@@ -47,9 +46,11 @@ npm run dev           # wrangler dev on http://127.0.0.1:8787
 For a client dev loop with HMR, additionally run `npm run dev:client` (Vite
 on :5173, proxying `/api` to wrangler).
 
-`DEV_ALLOW_USER` (from `.dev.vars`) bypasses Access **only for localhost
-requests**, because `wrangler dev` has no Access in front of it. Never set it
-on a deployed Worker.
+No `.dev.vars` is required. Without `RESEND_API_KEY` the Worker prints
+sign-in codes and invite mail to the wrangler terminal; sign in as
+`alex@example.com` (a seeded ledger member) and copy the six digits from
+there. `cp .dev.vars.example .dev.vars` makes alex the owner locally so the
+owner settings screen shows.
 
 ### Tests
 
@@ -57,39 +58,38 @@ on a deployed Worker.
 npm test              # typecheck (worker, client, tests) + vitest
 ```
 
-Migrations are applied from zero on every run. Auth tests forge valid JWTs
-with the committed test-only keypair in `test/keys/` and exercise the real
-verification path (signature, issuer, audience, expiry).
+Migrations are applied from zero on every run. Auth tests mint real session
+rows and, for the code flow, patch outbound `fetch` to capture what Resend
+would have sent (`test/helpers/mail.ts`).
 
-## Cloudflare Access setup (auth)
+## Sign-in
 
-Access hosts the login screen itself — the app has no sign-in UI and boots
-assuming an authenticated request. The shape:
+Tally signs people in itself: email → a six-digit code by email → a session.
+There are no passwords and no third-party identity provider.
 
-1. **Create an Access application** (Zero Trust → Access → Applications →
-   Add → Self-hosted) for the app's hostname.
-2. **Login method: One-Time PIN** only (Zero Trust → Settings →
-   Authentication). Users enter their email, get a 6-digit code.
-3. **Policy**: Allow, with an explicit list of member emails. This list is
-   the app's entire user directory.
-4. **Session duration: 1 month**, so the PWA doesn't re-prompt constantly.
-5. **Disable the `workers.dev` route** for the Worker (the custom domain is
-   the only entry, so nothing bypasses Access).
-6. Copy the application **AUD tag** into `ACCESS_AUD` and your team domain
-   into `ACCESS_TEAM_DOMAIN` in `wrangler.jsonc`.
-
-The Worker verifies `Cf-Access-Jwt-Assertion` against
-`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs` (keys cached per
-isolate). The `Cf-Access-Authenticated-User-Email` header is never trusted —
-or read. D1 stores no auth data.
+- **Codes** (`src/worker/auth.ts`): `POST /api/auth/code` emails a code
+  (10 minutes, single use, five wrong tries and it's dead); `POST
+  /api/auth/verify` exchanges it for a session cookie. Only the code's hash
+  is stored. Requests are rate-limited per address and globally.
+- **Sessions** (`src/worker/session.ts`): a 256-bit token in an
+  `HttpOnly; SameSite=Lax; Secure` cookie, its sha256 as the D1 row.
+  90 days, extended on use; `POST /api/auth/signout` deletes the row.
+- **Who can sign in**: invite-only by default — the owner (`ADMIN_EMAIL`),
+  anyone with an account, any ledger member, or an explicit invite. The
+  owner can invite by email or open sign-up to anyone from the app's
+  "Owner settings" screen. Creating a ledger with someone's email is itself
+  an invite (they get an email).
+- **Mail** (`src/worker/mailer.ts`): Resend, from `MAIL_FROM`. Set the
+  `RESEND_API_KEY` secret and verify the sending domain in Resend
+  (its DKIM/SPF records go in the Cloudflare zone). Without the key the
+  Worker prints mail to the console — local dev only.
+- **Scan caps** (`src/worker/receipts.ts`): 30 uploads per person and
+  200 overall per 24 h, so opening sign-up can't drain the model key.
 
 ### Adding a friend
 
-Two steps, both required:
-
-1. **Access policy**: add their email to the Access application's Allow
-   policy (Zero Trust dashboard) so they can log in at all.
-2. **Create the ledger**: in the app, "New ledger" → enter their email.
+In the app, "New ledger" → enter their email. That's it — they get an
+invite email and can sign in.
 
 ## PWA
 
@@ -97,14 +97,14 @@ The client ships a manifest + icons and installs to the home screen
 (standalone display). The dev-only state gallery — the mockup's demo-jump
 sidebar reborn as a QA tool — is served ONLY by `npm run dev:client` at
 `http://localhost:5173/#gallery` and is excluded from production bundles.
-When the Access session expires inside the installed app, the client
-reloads the document so Access can host its login again.
+When the session expires inside the installed app, the client navigates to
+`/login`, which renders the sign-in screen in place.
 
 ## Repository map
 
 ```
 migrations/   D1 schema (append-only ledger; view + window fn for balances)
-src/worker/   Hono app: Access JWT middleware, routes, D1 queries
+src/worker/   Hono app: session middleware, auth/admin routes, D1 queries, mail
 src/client/   React app ported from the mockup
 src/shared/   Types, money math, canonical<->viewer translation, formatting
 test/         Integration (real workerd/D1) + unit/property tests

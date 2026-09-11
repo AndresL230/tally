@@ -187,9 +187,9 @@ same bytes never counts), two counts on the existing `receipts.uploaded_by` /
   "Open Tally" button to `https://tally.andresl.dev/login`.
 
 Both have HTML and plain-text bodies (artboards 2a/2b give the exact
-markup and copy). The logo is a hosted PNG — Gmail strips inline SVG — served
-from `src/client/public/email-logo.png` at `https://tally.andresl.dev/email-logo.png`;
-email-safe fonts only (Georgia / Helvetica, Arial / Courier New). Sent: the code on `/auth/code`; the
+markup and copy). The logo is a hosted PNG — Gmail strips inline SVG — the
+existing `icon-192.png` (already served from `src/client/public/`), no new
+asset; email-safe fonts only (Georgia / Helvetica, Arial / Courier New). Sent: the code on `/auth/code`; the
 invite on an owner invite, and on `POST /api/ledgers` when the friend has no
 `users` row yet.
 
@@ -310,7 +310,8 @@ anyone else.
 ## Local development
 
 `npm run dev` needs no `.dev.vars`. Codes print in the wrangler terminal as
-`[auth] code for alex@example.com: 482913`. The seeded `alex@example.com` is a
+the email itself — `[mail] Your Tally code: 482 913 → alex@example.com`
+followed by the text body. The seeded `alex@example.com` is a
 ledger member and therefore allowed. Set `ADMIN_EMAIL=alex@example.com` in
 `.dev.vars` to see the owner block; `.dev.vars.example` documents that and the
 optional `RESEND_API_KEY` for sending real mail from dev.

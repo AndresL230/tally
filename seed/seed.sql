@@ -1,5 +1,5 @@
 -- Demo seed mirroring the mockup's data (integer cents, canonical deltas).
--- Viewer for manual review: alex@example.com (set DEV_ALLOW_USER in .dev.vars).
+-- Viewer for manual review: alex@example.com (sign in with the console-printed code).
 -- Amounts follow the integer-cents rules, so item entries land within a cent
 -- of the mockup's float display (documented in DEVIATIONS.md).
 

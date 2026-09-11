@@ -9,8 +9,8 @@ import { sendMail } from "./mailer";
 import { invited } from "./emails";
 
 export function registerPrefs(app: Hono<AppContext>): void {
-  // Display name + accent color; the whole users row (D1 stores no auth
-  // data — identity is the Access-verified email, full stop).
+  // Display name + accent color; the whole users row (D1's auth data is
+  // sessions/codes elsewhere — identity here is just the session's email).
   app.put("/api/me", async (c) => {
     const email = c.get("email");
     const body = await readJson(c.req.raw);

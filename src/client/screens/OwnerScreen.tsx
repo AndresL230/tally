@@ -8,6 +8,7 @@ import type { AdminState, SignupMode } from "../../shared/types";
 import { ApiError, api } from "../api";
 import { looksLikeEmail } from "../../shared/prefs";
 import { shortDate } from "../../shared/format";
+import { isoDay } from "../util";
 import { ARCHIVO, CARD, INK, MONO, MUTED_1, MUTED_2, MUTED_3, MUTED_4, SERIF, type Colors } from "../theme";
 
 const ERROR_INK = "#8a4a3f";
@@ -32,10 +33,6 @@ const HELPER: Record<SignupMode, string> = {
 };
 
 type InviteState = { name: "idle" } | { name: "sending" } | { name: "sent"; email: string } | { name: "error"; message: string };
-
-function isoDate(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
-}
 
 export function OwnerScreen({ colors: C, onBack }: OwnerScreenProps) {
   const [state, setState] = useState<AdminState | null>(null);
@@ -76,12 +73,17 @@ export function OwnerScreen({ colors: C, onBack }: OwnerScreenProps) {
       const sent = await api.invite(to);
       setInvite({ name: "sent", email: sent.email });
       setEmail("");
-      setState(await api.admin());
     } catch (err) {
       setInvite({
         name: "error",
         message: err instanceof ApiError ? err.message : "That didn't go through — check the connection and try again.",
       });
+      return;
+    }
+    try {
+      setState(await api.admin());
+    } catch {
+      // The list refreshes next visit; the "sent" notice above still stands.
     }
   };
 
@@ -219,7 +221,7 @@ export function OwnerScreen({ colors: C, onBack }: OwnerScreenProps) {
                 <span style={{ flex: 1, minWidth: 0, font: `400 13px ${MONO}`, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {p.email}
                 </span>
-                <span style={{ flex: "none", font: `400 11px ${MONO}`, color: MUTED_4 }}>{shortDate(isoDate(p.invited_at))}</span>
+                <span style={{ flex: "none", font: `400 11px ${MONO}`, color: MUTED_4 }}>{shortDate(isoDay(p.invited_at))}</span>
                 <button
                   onClick={() => void remove(p.email)}
                   style={{ flex: "none", border: 0, background: "transparent", padding: 0, font: `500 12px ${ARCHIVO}`, color: MUTED_3, cursor: "pointer" }}

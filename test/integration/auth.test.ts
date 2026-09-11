@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SELF, env } from "cloudflare:test";
 import { authedFetch, sessionCookieFor } from "../helpers/auth";
-import { ALEX, insertCode } from "../helpers/fixtures";
+import { ALEX, insertCode, insertLedger } from "../helpers/fixtures";
 import { failNextSend, installMailPatch, lastCodeFor, outbox, removeMailPatch } from "../helpers/mail";
-import { CODE_TTL_MS, MAX_ATTEMPTS } from "../../src/worker/auth";
+import { CODE_TTL_MS, GLOBAL_HOURLY, MAX_ATTEMPTS, PER_EMAIL_HOURLY, RESEND_COOLDOWN_MS } from "../../src/worker/auth";
+import { setSignupMode } from "../../src/worker/settings";
 import {
   RENEW_BELOW_MS,
   SESSION_COOKIE,
@@ -163,7 +164,10 @@ function cookieOf(res: Response): string {
 }
 
 describe("POST /api/auth/code + /api/auth/verify", () => {
-  beforeEach(() => installMailPatch());
+  beforeEach(async () => {
+    installMailPatch();
+    await insertLedger(ALEX, "jordan@example.com"); // ALEX is a ledger member => allowed
+  });
   afterEach(() => removeMailPatch());
 
   it("emails a code, verifies it, and the cookie authenticates", async () => {
@@ -292,5 +296,108 @@ describe("GET /login", () => {
     const app = await SELF.fetch(`${ORIGIN}/login?next=/x`, { headers: { Cookie: await sessionCookieFor(ALEX) } });
     expect(app.status).toBe(200);
     expect(await app.text()).toContain('<div id="root">');
+  });
+});
+
+describe("who may request a code (invite-only by default)", () => {
+  beforeEach(() => installMailPatch());
+  afterEach(() => removeMailPatch());
+
+  const STRANGER = "stranger@example.com";
+
+  it("refuses an unknown email with an explicit 'not invited' and sends nothing", async () => {
+    const res = await post("/api/auth/code", { email: STRANGER });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "not invited" });
+    expect(outbox).toHaveLength(0);
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM auth_codes").first<{ n: number }>();
+    expect(n!.n).toBe(0);
+  });
+
+  it("allows the owner (ADMIN_EMAIL), case-insensitively", async () => {
+    expect((await post("/api/auth/code", { email: "Admin@Example.com" })).status).toBe(200);
+  });
+
+  it("allows anyone with a users row", async () => {
+    await env.DB.prepare("INSERT INTO users (email, display_name, accent_color, created_at) VALUES (?1, 'S', NULL, 1)")
+      .bind(STRANGER)
+      .run();
+    expect((await post("/api/auth/code", { email: STRANGER })).status).toBe(200);
+  });
+
+  it("allows a member of any ledger, on either side", async () => {
+    await insertLedger(ALEX, "zed@example.com");
+    expect((await post("/api/auth/code", { email: "zed@example.com" })).status).toBe(200);
+    expect((await post("/api/auth/code", { email: ALEX })).status).toBe(200);
+  });
+
+  it("allows an explicit invite", async () => {
+    await env.DB.prepare("INSERT INTO invites (email, invited_by, created_at) VALUES (?1, ?2, ?3)")
+      .bind(STRANGER, "admin@example.com", Date.now())
+      .run();
+    expect((await post("/api/auth/code", { email: STRANGER })).status).toBe(200);
+  });
+
+  it("open mode admits an unknown email; switching back closes the door again", async () => {
+    await setSignupMode(env.DB, "open");
+    expect((await post("/api/auth/code", { email: STRANGER })).status).toBe(200);
+    await setSignupMode(env.DB, "invite");
+    expect((await post("/api/auth/code", { email: "other@example.com" })).status).toBe(403);
+  });
+});
+
+describe("rate limits on /api/auth/code", () => {
+  beforeEach(async () => {
+    installMailPatch();
+    await insertLedger(ALEX, "jordan@example.com");
+  });
+  afterEach(() => removeMailPatch());
+
+  it("per-email cooldown: a second request inside 60 s is 429 with retry_after", async () => {
+    expect((await post("/api/auth/code", { email: ALEX })).status).toBe(200);
+    const res = await post("/api/auth/code", { email: ALEX });
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { error: string; retry_after: number };
+    expect(body.error).toBe("slow down");
+    expect(body.retry_after).toBeGreaterThan(0);
+    expect(body.retry_after).toBeLessThanOrEqual(RESEND_COOLDOWN_MS / 1000);
+    expect(outbox).toHaveLength(1);
+  });
+
+  it("per-email hourly cap: the sixth code in an hour is refused even after the cooldown", async () => {
+    const now = Date.now();
+    for (let i = 0; i < PER_EMAIL_HOURLY; i++) {
+      await insertCode(ALEX, "000000", { created_at: now - (i + 2) * 2 * 60 * 1000 });
+    }
+    const res = await post("/api/auth/code", { email: ALEX });
+    expect(res.status).toBe(429);
+    const body = (await res.json()) as { retry_after: number };
+    expect(body.retry_after).toBeGreaterThan(RESEND_COOLDOWN_MS / 1000);
+  });
+
+  it("global hourly cap protects the mail quota across all emails", async () => {
+    const now = Date.now();
+    for (let i = 0; i < GLOBAL_HOURLY; i++) {
+      await insertCode(`u${i}@example.com`, "000000", { created_at: now - 5 * 60 * 1000 });
+    }
+    const res = await post("/api/auth/code", { email: ALEX }); // ALEX is unused so far
+    expect(res.status).toBe(429);
+    expect(outbox).toHaveLength(0);
+  });
+
+  it("limits are checked before the allow check, so a stranger can't probe past them", async () => {
+    const now = Date.now();
+    for (let i = 0; i < GLOBAL_HOURLY; i++) {
+      await insertCode(`u${i}@example.com`, "000000", { created_at: now - 5 * 60 * 1000 });
+    }
+    const res = await post("/api/auth/code", { email: "stranger@example.com" });
+    expect(res.status).toBe(429);
+  });
+
+  it("prunes codes older than a day on each request", async () => {
+    await insertCode("old@example.com", "000000", { created_at: Date.now() - 25 * 60 * 60 * 1000 });
+    await post("/api/auth/code", { email: ALEX });
+    const old = await env.DB.prepare("SELECT COUNT(*) AS n FROM auth_codes WHERE email = 'old@example.com'").first<{ n: number }>();
+    expect(old!.n).toBe(0);
   });
 });

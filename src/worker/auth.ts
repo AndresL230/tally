@@ -4,6 +4,7 @@ import { looksLikeEmail } from "../shared/prefs";
 import { ValidationError, assertString, readJson } from "./validate";
 import { sendMail } from "./mailer";
 import { signInCode } from "./emails";
+import { getSignupMode } from "./settings";
 import {
   SESSION_COOKIE,
   clearedSessionCookie,
@@ -100,6 +101,63 @@ function normalizeEmail(value: unknown): string {
   return email;
 }
 
+export const RESEND_COOLDOWN_MS = 60 * 1000;
+export const PER_EMAIL_HOURLY = 5;
+export const GLOBAL_HOURLY = 30;
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * Invite-only unless the owner opened sign-up: the owner, anyone with a
+ * users row, any ledger member, or an explicit invite may request a code.
+ */
+export async function mayRequestCode(env: Env, email: string): Promise<boolean> {
+  if (env.ADMIN_EMAIL && env.ADMIN_EMAIL.toLowerCase() === email) return true;
+  if ((await getSignupMode(env.DB)) === "open") return true;
+  const known = await env.DB.prepare(
+    `SELECT 1 AS ok
+     WHERE EXISTS (SELECT 1 FROM users WHERE email = ?1)
+        OR EXISTS (SELECT 1 FROM invites WHERE email = ?1)
+        OR EXISTS (SELECT 1 FROM ledgers WHERE person_a = ?1 OR person_b = ?1)`,
+  )
+    .bind(email)
+    .first<{ ok: number }>();
+  return known !== null;
+}
+
+interface Limited {
+  retryAfter: number;
+}
+
+function secondsUntil(t: number, now: number): number {
+  return Math.max(1, Math.ceil((t - now) / 1000));
+}
+
+/** Global cap, then per-email cooldown, then per-email hourly cap. */
+async function rateLimited(db: D1Database, email: string, now: number): Promise<Limited | null> {
+  const since = now - HOUR_MS;
+  const all = await db
+    .prepare("SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM auth_codes WHERE created_at > ?1")
+    .bind(since)
+    .first<{ n: number; oldest: number | null }>();
+  if (all && all.n >= GLOBAL_HOURLY) {
+    return { retryAfter: secondsUntil((all.oldest ?? now) + HOUR_MS, now) };
+  }
+  const mine = await db
+    .prepare(
+      `SELECT COUNT(*) AS n, MIN(created_at) AS oldest, MAX(created_at) AS newest
+       FROM auth_codes WHERE email = ?1 AND created_at > ?2`,
+    )
+    .bind(email, since)
+    .first<{ n: number; oldest: number | null; newest: number | null }>();
+  if (mine && mine.newest !== null && now - mine.newest < RESEND_COOLDOWN_MS) {
+    return { retryAfter: secondsUntil(mine.newest + RESEND_COOLDOWN_MS, now) };
+  }
+  if (mine && mine.n >= PER_EMAIL_HOURLY) {
+    return { retryAfter: secondsUntil((mine.oldest ?? now) + HOUR_MS, now) };
+  }
+  return null;
+}
+
 /**
  * The public half of auth. Registered BEFORE `app.use("/api/*", requireUser)`
  * in index.ts — in Hono, a route registered earlier answers before later
@@ -113,6 +171,10 @@ export function registerAuth(app: Hono<AppContext>): void {
     const db = c.env.DB;
     // Housekeeping: dead codes are worthless after a day.
     await db.prepare("DELETE FROM auth_codes WHERE created_at < ?1").bind(now - DAY_MS).run();
+
+    const limited = await rateLimited(db, email, now);
+    if (limited) return c.json({ error: "slow down", retry_after: limited.retryAfter }, 429);
+    if (!(await mayRequestCode(c.env, email))) return c.json({ error: "not invited" }, 403);
 
     const code = randomCode();
     const id = crypto.randomUUID();

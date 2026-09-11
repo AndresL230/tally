@@ -16,6 +16,7 @@ import { ReadingScreen, type ReadingPhase } from "./screens/ReadingScreen";
 import { ConfirmScreen, type ConfirmCommit } from "./screens/ConfirmScreen";
 import { PercentScreen } from "./screens/PercentScreen";
 import { SignInScreen } from "./screens/SignInScreen";
+import { OwnerScreen } from "./screens/OwnerScreen";
 import { todayISO } from "./util";
 
 export function friendDisplayName(detail: LedgerDetail): string {
@@ -74,6 +75,7 @@ export default function App() {
   const [startAccent, setStartAccent] = useState<string>(DEFAULT_ACCENT);
   // Prefs editing after onboarding (M3 review F5): reachable from the picker.
   const [editingPrefs, setEditingPrefs] = useState(false);
+  const [viewingOwner, setViewingOwner] = useState(false);
 
   // One idempotency id per user commit intent (contract rule 4). It is
   // minted on the first attempt and reused verbatim if that attempt fails
@@ -225,8 +227,7 @@ export default function App() {
     setEditingPrefs(true);
   };
 
-  // Task 10 wires this to `viewingOwner` state; a no-op placeholder for now.
-  const openOwner = () => {};
+  const openOwner = () => setViewingOwner(true);
 
   const signOut = () => {
     // Best effort: the server row is deleted; the cookie is cleared by the
@@ -288,6 +289,12 @@ export default function App() {
 
   const colors = colorsFor(me.accent_color);
 
+  // Logo/wordmark click: to the landing page (which greets a signed-in
+  // visitor with a back-to-the-app CTA instead of Sign in).
+  const goHome = () => {
+    window.location.assign("/welcome");
+  };
+
   // ---- Picker: the root screen whenever no ledger is open -----------------
   if (editingPrefs) {
     const preview = colorsFor(startAccent);
@@ -327,11 +334,19 @@ export default function App() {
     );
   }
 
-  // Logo/wordmark click: to the landing page (which greets a signed-in
-  // visitor with a back-to-the-app CTA instead of Sign in).
-  const goHome = () => {
-    window.location.assign("/welcome");
-  };
+  // ---- Owner settings: same shape as prefs editing ------------------------
+  if (viewingOwner && me.is_admin) {
+    const owner = <OwnerScreen colors={colors} onBack={() => setViewingOwner(false)} />;
+    return isDesktop ? (
+      <DesktopShell accent={colors.me} rail={railFor(colors)} onHome={goHome}>
+        {owner}
+      </DesktopShell>
+    ) : (
+      <Shell accent={colors.me} onHome={goHome}>
+        {owner}
+      </Shell>
+    );
+  }
 
   const phonePicker = (
     <Shell accent={colors.me} onHome={goHome}>

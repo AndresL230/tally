@@ -186,7 +186,10 @@ same bytes never counts), two counts on the existing `receipts.uploaded_by` /
   Tally` (or `You've been invited to Tally` when sent by the owner); one
   "Open Tally" button to `https://tally.andresl.dev/login`.
 
-Both have HTML and plain-text bodies. Sent: the code on `/auth/code`; the
+Both have HTML and plain-text bodies (artboards 2a/2b give the exact
+markup and copy). The logo is a hosted PNG — Gmail strips inline SVG — served
+from `src/client/public/email-logo.png` at `https://tally.andresl.dev/email-logo.png`;
+email-safe fonts only (Georgia / Helvetica, Arial / Courier New). Sent: the code on `/auth/code`; the
 invite on an owner invite, and on `POST /api/ledgers` when the friend has no
 `users` row yet.
 
@@ -195,37 +198,101 @@ SPF (+ DMARC) records in the Cloudflare zone.
 
 ## Client
 
+Visuals come from the Claude Design project "Sign-in and ledgers screens"
+(https://claude.ai/design/p/75b079dd-3f7a-4a09-88a9-6bc746db3ebb), exported to
+`mockup/signin-account.dc.html` in this repo so the port has a local
+reference. Artboards: 1a sign-in (7 phone states), 1b your-ledgers account
+area + owner settings, 1c desktop, 2a/2b emails.
+
 ### Sign-in as a boot phase — `src/client/App.tsx`, `screens/SignInScreen.tsx`
 
 `Boot` gains `{ phase: "signin" }`. Boot calls `api.me()`; a `401` lands in
 that phase (a visit to `/login` serves the shell and arrives the same way).
-`SignInScreen` implements the designed states: email → sending → code entry →
-wrong code (tries left) → expired/too many tries → not invited → slow down
-(countdown from `retry_after`); plus "send a new code" and "use a different
-email". On success it does `history.replaceState(null, "", "/")` and the boot
+On success the screen does `history.replaceState(null, "", "/")` and the boot
 effect re-runs in place — no reload.
 
-The screen renders inside the existing `Shell` with `accent = null` (the
-default accent), and inside a centered card on desktop.
+`SignInScreen` renders inside the existing `Shell` with the default accent
+and keeps every state on the same skeleton (artboard 1a):
+
+1. **email** — "Sign in" / "We'll email you a six-digit code. There are no
+   passwords." / Email underline input / "Send me a code" (disabled until the
+   field looks like an email).
+2. **sending** — button reads "Sending…" at 85% opacity.
+3. **code** — "Check your email" / "We sent a 6-digit code to **addr**. It
+   works for 10 minutes." / six underline slots grouped 3 + 3 in the mono
+   face at 32px, the active slot's underline 2px accent; ONE hidden
+   `<input inputmode="numeric" autocomplete="one-time-code">` behind them so
+   paste and iOS autofill fill all six / "Sign in" / footer "Send a new code ·
+   Use a different email".
+4. **wrong code** — slots tinted `rgba(10,138,155,.16)` (digits selected for
+   retyping); line under them in `#8a4a3f`: "That code isn't right. N tries
+   left."
+5. **expired / too many tries** — the slots are gone; body reads "That code
+   has expired." or "Too many tries — that code is no longer valid."; primary
+   button becomes "Send a new code"; footer keeps "Use a different email".
+6. **not invited** — "Not on the list yet" / "Tally is invite-only. Ask the
+   person you share a ledger with to add you, then try again." / "Try
+   another email".
+7. **slow down** — email step with body "You asked for a code a moment ago.
+   Give it a minute, then try again.", a mono countdown (`0:47`) above the
+   disabled button, driven by `retry_after`.
+
+Desktop (≥ 900px, artboard 1c D1/D2): the same content in a centered
+`CARD` (420px wide, 96px from the top, padding 30/34/28) on the paper
+background, heading at 40px. Nothing else on the page.
 
 ### `src/client/api.ts`
 
-Adds `requestCode(email)`, `verifyCode(email, code)`, `signOut()`. The
-`opaqueredirect` / non-JSON detection and its comment are removed — nothing
-redirects `/api` anymore. A plain `401` from any call *after* boot (the
-session died mid-use) keeps today's throttled `location.assign("/login")`.
+Adds `requestCode(email)`, `verifyCode(email, code)`, `signOut()`, and the
+admin calls. The `opaqueredirect` / non-JSON detection and its comment are
+removed — nothing redirects `/api` anymore. A plain `401` from any call
+*after* boot (the session died mid-use) keeps today's throttled
+`location.assign("/login")`.
 
 `welcome.html`'s "am I signed in" script works unchanged: a `401` is `!r.ok`,
 so the CTAs stay "Sign in".
 
-### Sign-out and the owner block — `screens/PickerScreen.tsx`
+### The account area — `screens/PickerScreen.tsx` (artboard 1b)
 
-- A third quiet link, "Sign out ›" → `api.signOut()` then
-  `location.assign("/login")`.
-- Owner-only block (when `me.is_admin`), per the design: the "Who can sign in"
-  choice (`Invite only` / `Anyone with an email`) with its helper line; the
-  "Invite someone" inline form with idle / sending / sent / error states; the
-  pending-invites list with per-row remove, and its empty line.
+Below "+ New ledger", after a dashed tear (`border-top: 1px dashed
+rgba(0,0,0,.2)`, 28px above, 16px below), an account area of bordered rows
+(`padding 12px 15px; border-radius 14px; border 1px solid rgba(0,0,0,.13)`,
+8px apart), each with an 11px dot, a 15px/600 title, a 12px muted subtitle,
+and a trailing "›":
+
+- **Identity row** — dot in the viewer's accent; title = display name;
+  subtitle "Your name and color". Opens prefs editing (replaces the old
+  "Edit your name and color ›" link).
+- **Owner settings row** — owner only (`me.is_admin`); ink dot; subtitle
+  "Who can sign in · invites". Opens the owner screen.
+- **Footer** — centered, 12px below the rows: "About Tally · Sign out" in
+  the quiet-link style with a `#c9c2b6` middot. Tapping Sign out calls
+  `api.signOut()`, the label becomes "Signed out." in `#4a453d` for ~700 ms,
+  then `location.assign("/login")`. No confirm dialog (artboard C's note:
+  cheap to undo, least prominent thing on the page).
+
+On desktop the same rows and footer sit at the bottom of the rail
+(`LedgerNav`), at the rail's compact sizes (artboard D3).
+
+### Owner settings — `screens/OwnerScreen.tsx` (artboards A2, D, D3)
+
+A new `Screen` variant `{ name: "owner" }`, rendered like any other screen
+(phone: full screen with "‹ Back"; desktop: in the right pane). Loads
+`GET /api/admin` on mount.
+
+- **Who can sign in** — label, then two segmented options ("Invite only" /
+  "Anyone with an email"; selected = ink fill `#211f1c` with `#fbfaf6` text,
+  other = outlined `rgba(0,0,0,.28)`; `padding 9px 14px; radius 10px`),
+  then helper copy: invite → "Only people you or a ledger has added can sign
+  in."; open → "Anyone can sign in and use your scan budget. Switch back when
+  you're done." Tapping calls `PUT /api/admin/signup-mode`.
+- **Invite someone** — mono underline input (15px) with an inline "Send
+  invite" text action in the accent, 600 13px. States: idle; sending ("Sending…"
+  in muted); sent — an accent-left-bordered note "Invited addr — they'll get
+  an email."; error — "That's not an email address." in `#8a4a3f`.
+- **Pending invites** — rows of email (mono 13px, ellipsized), invited date
+  (mono 11px, `#a8a298`, e.g. "Sep 2"), and a "Remove" text action; empty
+  state "No pending invites."
 
 ## Admin routes — `src/worker/admin.ts`
 

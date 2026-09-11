@@ -1,40 +1,20 @@
-import { SignJWT, importJWK } from "jose";
 import { env, SELF } from "cloudflare:test";
-import privateJwk from "../keys/jwk-private.json";
+import { SESSION_COOKIE, createSession } from "../../src/worker/session";
 
-export interface JwtOptions {
-  aud?: string;
-  iss?: string;
-  expiresIn?: number; // seconds; negative = already expired
-  omitEmail?: boolean;
-  kid?: string; // override the key id in the protected header
-  omitExp?: boolean;
+/** Mint a real session row for `email`; returns the Cookie header value. */
+export async function sessionCookieFor(email: string): Promise<string> {
+  const token = await createSession(env.DB, email.toLowerCase());
+  return `${SESSION_COOKIE}=${token}`;
 }
 
-/** Sign a JWT the way Cloudflare Access would, using the committed test key. */
-export async function accessJwt(email: string, opts: JwtOptions = {}): Promise<string> {
-  const key = await importJWK(privateJwk as JsonWebKey, "RS256");
-  const now = Math.floor(Date.now() / 1000);
-  const expiresIn = opts.expiresIn ?? 600;
-  const jwt = new SignJWT(opts.omitEmail ? {} : { email })
-    .setProtectedHeader({ alg: "RS256", kid: opts.kid ?? "tally-test-key" })
-    .setIssuer(opts.iss ?? `https://${env.ACCESS_TEAM_DOMAIN}`)
-    .setAudience(opts.aud ?? env.ACCESS_AUD)
-    .setIssuedAt(now)
-    .setSubject(`test-sub-${email}`);
-  if (!opts.omitExp) jwt.setExpirationTime(now + expiresIn);
-  return await jwt.sign(key);
-}
-
-/** SELF.fetch with a forged-valid Access JWT for `email`. */
+/** SELF.fetch as `email`: a fresh, valid session cookie on every call. */
 export async function authedFetch(
   path: string,
   email: string,
   init: RequestInit = {},
 ): Promise<Response> {
-  const token = await accessJwt(email);
   const headers = new Headers(init.headers);
-  headers.set("Cf-Access-Jwt-Assertion", token);
+  headers.set("Cookie", await sessionCookieFor(email));
   return await SELF.fetch(`https://tally.test${path}`, { ...init, headers });
 }
 

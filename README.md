@@ -14,12 +14,11 @@ drafts, never posts — a human confirms every entry.
 - **D1** for data (`migrations/`), **R2** for receipt images.
 - **Anthropic API through Cloudflare AI Gateway** for extraction. The
   API key is a Worker secret; the client never calls the model.
-- **Cloudflare Access (One-Time PIN)** for auth — Access hosts login before
-  requests reach the Worker; the Worker verifies the Access JWT against the
-  team JWKS on every `/api/*` request.
+- **Own sign-in** — a 6-digit code emailed through Resend, sessions in D1
+  (`src/worker/auth.ts`, `session.ts`). See "Sign-in" below.
 - **Vitest with `@cloudflare/vitest-pool-workers`** — tests run in real
-  workerd with real D1/R2 bindings; the only fakes are Access JWTs (signed
-  with a committed test-only key) and the model API (fixture responses).
+  workerd with real D1/R2 bindings; the only fakes are outbound mail
+  (Resend) and the model API (fixture responses).
 
 ## Money rules (non-negotiable)
 

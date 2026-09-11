@@ -63,7 +63,7 @@ export function signInCode(code: string): MailContent {
     subject: `Your Tally code: ${shown}`,
     html: shell(
       `<div style="margin-top:4px;background:#fbfaf6;border:1px solid rgba(0,0,0,.09);border-radius:6px;` +
-        `padding:26px 10px;font:600 40px ${MONO};color:#211f1c;letter-spacing:.04em">${shown}</div>` +
+        `padding:27px 10px 21px;font:600 40px/40px ${MONO};color:#211f1c;letter-spacing:.04em">${shown}</div>` +
         `<div style="margin-top:16px;font:400 15px ${SANS};line-height:1.5;color:#4a453d">` +
         `This code works for 10 minutes and can be used once.</div>` +
         `<div style="margin-top:26px;font:400 12px ${SANS};line-height:1.5;color:#8a857c">` +

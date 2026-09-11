@@ -1,9 +1,8 @@
 // The two transactional emails, ported from the Claude Design artboards
 // (mockup/signin-account.dc.html, 2a/2b). Email-safe on purpose: inline
-// styles, system font stacks, no web fonts, and no images at all — the
-// brand mark is a solid accent banner with a text wordmark, so it renders
-// the same with images blocked or proxied. Every template has an HTML and
-// a plain-text body.
+// styles, system font stacks, no web fonts, and the one image is the app
+// icon on the accent banner (Gmail strips inline SVG). Every template has an
+// HTML and a plain-text body.
 
 export interface MailContent {
   subject: string;
@@ -18,15 +17,17 @@ const SANS = "Helvetica,Arial,sans-serif";
 const MONO = "'Courier New',monospace";
 const ACCENT = "#0a8a9b";
 
-// Four tally strokes drawn as inline blocks (no image), then the wordmark.
-const STROKE =
-  `<span style="display:inline-block;width:3px;height:16px;background:#ffffff;` +
-  `border-radius:2px;margin-right:4px;vertical-align:middle"></span>`;
+// The real mark — the app icon (ink strokes, accent diagonal, on paper) —
+// as a small tile on the accent banner, next to the text wordmark. The
+// alt text carries the name when a client blocks images.
+const MARK =
+  `<img src="${APP_URL}/icon-192.png" width="36" height="36" alt="Tally" ` +
+  `style="display:inline-block;border-radius:8px;vertical-align:middle">`;
 const BANNER =
   `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">` +
-  `<tr><td style="background:${ACCENT};padding:18px 24px;border-radius:8px 8px 0 0;text-align:left">` +
-  STROKE.repeat(4) +
-  `<span style="display:inline-block;margin-left:8px;color:#ffffff;font:600 15px ${MONO};` +
+  `<tr><td style="background:${ACCENT};padding:16px 20px;border-radius:8px 8px 0 0;text-align:left">` +
+  MARK +
+  `<span style="display:inline-block;margin-left:12px;color:#ffffff;font:600 16px ${MONO};` +
   `letter-spacing:.08em;vertical-align:middle">Tally</span>` +
   `<span style="display:inline-block;margin-left:12px;color:rgba(255,255,255,.75);font:400 12px ${SANS};` +
   `vertical-align:middle">a private ledger for two</span>` +

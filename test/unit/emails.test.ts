@@ -16,10 +16,10 @@ describe("sign-in code email", () => {
     expect(m.text).not.toContain("http");
   });
 
-  it("uses only email-safe fonts, no images, and a banner wordmark", () => {
+  it("uses only email-safe fonts and the app icon on a banner", () => {
     const m = signInCode("123456");
     expect(m.html).not.toContain("<svg");
-    expect(m.html).not.toContain("<img");
+    expect(m.html).toContain('src="https://tally.andresl.dev/icon-192.png"');
     expect(m.html).toContain('<meta charset="utf-8">');
     expect(m.html).toContain("background:#0a8a9b");
     expect(m.html).toContain(">Tally</span>");

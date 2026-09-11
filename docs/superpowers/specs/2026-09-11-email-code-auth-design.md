@@ -189,8 +189,8 @@ same bytes never counts), two counts on the existing `receipts.uploaded_by` /
   "Open Tally" button to `https://tally.andresl.dev/login`.
 
 Both have HTML and plain-text bodies (artboards 2a/2b give the exact
-markup and copy). The brand mark is a solid accent banner with a text wordmark — no images
-at all, so it survives image blocking and proxying;
+markup and copy). The brand mark is the app icon (`icon-192.png`, already public) on a solid
+accent banner with a text wordmark — Gmail strips inline SVG;
 invite on an owner invite, and on `POST /api/ledgers` when the friend has no
 `users` row yet.
 

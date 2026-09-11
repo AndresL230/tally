@@ -8,6 +8,7 @@ import type { LedgerSummary } from "../../shared/types";
 import { ARCHIVO, MONO, MUTED_1, MUTED_3, SERIF, type Colors } from "../theme";
 import { LedgerRows, NewLedgerControl } from "./LedgerNav";
 import { TallyMark } from "./TallyMark";
+import { AccountArea } from "./AccountArea";
 
 const BREAKPOINT = "(min-width: 900px)";
 
@@ -29,7 +30,11 @@ export interface DesktopRailProps {
   activeLedgerId: string | null;
   onOpen: (ledger: LedgerSummary) => void;
   onCreate: (email: string) => Promise<void>;
-  onEditPrefs?: () => void;
+  displayName: string;
+  isAdmin: boolean;
+  onEditPrefs: () => void;
+  onOwnerSettings: () => void;
+  onSignOut: () => void;
 }
 
 export interface DesktopShellProps {
@@ -114,34 +119,15 @@ export function DesktopShell({ accent, rail, railInert, onHome, children }: Desk
                 compact
               />
             </div>
-            {rail.onEditPrefs && (
-              <button
-                onClick={rail.onEditPrefs}
-                style={{
-                  marginTop: 20,
-                  border: 0,
-                  background: "transparent",
-                  padding: 0,
-                  font: `500 13px ${ARCHIVO}`,
-                  color: MUTED_3,
-                  cursor: "pointer",
-                }}
-              >
-                Edit your name and color ›
-              </button>
-            )}
-            <a
-              href="/welcome"
-              style={{
-                display: "inline-block",
-                marginTop: 12,
-                font: `500 13px ${ARCHIVO}`,
-                color: MUTED_3,
-                textDecoration: "none",
-              }}
-            >
-              About Tally ›
-            </a>
+            <AccountArea
+              colors={rail.colors}
+              displayName={rail.displayName}
+              isAdmin={rail.isAdmin}
+              compact
+              onEditPrefs={rail.onEditPrefs}
+              onOwnerSettings={rail.onOwnerSettings}
+              onSignOut={rail.onSignOut}
+            />
           </aside>
           <main
             style={{

@@ -8,6 +8,21 @@ export interface UserPrefs {
   email: string;
   display_name: string | null;
   accent_color: string | null;
+  /** The one owner (ADMIN_EMAIL): sees the owner settings screen. */
+  is_admin: boolean;
+}
+
+export type SignupMode = "invite" | "open";
+
+export interface PendingInvite {
+  email: string;
+  invited_at: number;
+}
+
+export interface AdminState {
+  signup_mode: SignupMode;
+  /** Invited people who have not onboarded yet (no users row). */
+  pending: PendingInvite[];
 }
 
 export interface LedgerSummary {

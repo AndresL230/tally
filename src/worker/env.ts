@@ -2,15 +2,12 @@ export interface Env {
   DB: D1Database;
   RECEIPTS: R2Bucket;
   ASSETS: Fetcher;
-  ACCESS_TEAM_DOMAIN: string;
-  ACCESS_AUD: string;
-  /** Test-only override: a JWKS JSON string used instead of the remote team JWKS. */
-  ACCESS_JWKS?: string;
-  /**
-   * Local-dev-only identity bypass, set via .dev.vars, honored only for
-   * localhost requests. NEVER set this on a deployed Worker.
-   */
-  DEV_ALLOW_USER?: string;
+  /** The one owner: admin routes, always allowed to sign in. Plain var. */
+  ADMIN_EMAIL?: string;
+  /** "Tally <sign-in@tally.andresl.dev>"; plain var. */
+  MAIL_FROM?: string;
+  /** Worker secret. Absent in local dev => codes print to the console. */
+  RESEND_API_KEY?: string;
   AI_GATEWAY_ACCOUNT_ID?: string;
   AI_GATEWAY_ID?: string;
   /** Worker secret. The client never sees or calls the model directly. */

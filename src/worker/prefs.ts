@@ -4,10 +4,17 @@ import { orderMembers } from "../shared/ledger";
 import { isAccentColor, looksLikeEmail } from "../shared/prefs";
 import { listLedgers } from "./db";
 import { ValidationError, assertId, assertString, readJson } from "./validate";
+import { isAdmin } from "./admin";
+import { sendMail } from "./mailer";
+import { invited } from "./emails";
+
+/** Creating a ledger emails the friend, so it is metered like the codes are. */
+export const LEDGERS_PER_DAY = 10;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function registerPrefs(app: Hono<AppContext>): void {
-  // Display name + accent color; the whole users row (D1 stores no auth
-  // data — identity is the Access-verified email, full stop).
+  // Display name + accent color; the whole users row (D1's auth data is
+  // sessions/codes elsewhere — identity here is just the session's email).
   app.put("/api/me", async (c) => {
     const email = c.get("email");
     const body = await readJson(c.req.raw);
@@ -38,12 +45,12 @@ export function registerPrefs(app: Hono<AppContext>): void {
     )
       .bind(email, displayName, accent, Date.now())
       .run();
-    return c.json({ email, display_name: displayName, accent_color: accent });
+    return c.json({ email, display_name: displayName, accent_color: accent, is_admin: isAdmin(c.env, email) });
   });
 
-  // New ledger = the friend's email. The other half of adding a friend is
-  // the Access policy (documented in README) — this route only
-  // creates the pair.
+  // New ledger = the friend's email. That IS the invite: ledger membership
+  // lets them request a sign-in code, and a new friend gets an email saying
+  // so. Mail is best-effort here — the ledger exists either way.
   app.post("/api/ledgers", async (c) => {
     const email = c.get("email");
     const body = await readJson(c.req.raw);
@@ -57,6 +64,19 @@ export function registerPrefs(app: Hono<AppContext>): void {
       throw new ValidationError("a ledger needs two different people");
     }
     const [a, b] = orderMembers(email, friend);
+
+    // A new ledger sends mail to a stranger, so it needs the same kind of
+    // cap the code route has — otherwise one signed-in account is an
+    // unmetered way to send invitations from our domain.
+    const recent = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM ledgers
+       WHERE (person_a = ?1 OR person_b = ?1) AND created_at > ?2`,
+    )
+      .bind(email, Date.now() - DAY_MS)
+      .first<{ n: number }>();
+    if (recent && recent.n >= LEDGERS_PER_DAY) {
+      return c.json({ error: "slow down" }, 429);
+    }
 
     // Idempotent by pair: creating a ledger that already exists lands you
     // in the existing one (200), whatever id the client minted this time.
@@ -78,6 +98,22 @@ export function registerPrefs(app: Hono<AppContext>): void {
       // Our insert didn't land and the pair doesn't exist: the id is used
       // by some other ledger.
       return c.json({ error: "id already used" }, 409);
+    }
+
+    if (insert.meta.changes === 1) {
+      const friendRow = await c.env.DB.prepare("SELECT 1 AS ok FROM users WHERE email = ?1")
+        .bind(friend)
+        .first<{ ok: number }>();
+      if (!friendRow) {
+        const me = await c.env.DB.prepare("SELECT display_name FROM users WHERE email = ?1")
+          .bind(email)
+          .first<{ display_name: string | null }>();
+        try {
+          await sendMail(c.env, { to: friend, ...invited(me?.display_name ?? null) });
+        } catch (err) {
+          console.error("invite mail failed", err);
+        }
+      }
     }
 
     const summaries = await listLedgers(c.env.DB, email);

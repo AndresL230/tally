@@ -1,12 +1,14 @@
 // M3: multiple ledgers + prefs. Cross-ledger isolation and the sign
 // convention verified from BOTH viewers are this milestone's gate.
 
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { SELF, env } from "cloudflare:test";
 import { authedFetch, authedJson } from "../helpers/auth";
 import { ALEX, JORDAN, SAM, OUTSIDER, insertExpense, insertLedger } from "../helpers/fixtures";
+import { installMailPatch, outbox, removeMailPatch } from "../helpers/mail";
 import { ACCENT_PALETTE } from "../../src/shared/prefs";
 import { viewerDelta } from "../../src/shared/ledger";
+import { LEDGERS_PER_DAY } from "../../src/worker/prefs";
 import type { LedgerDetail, LedgerSummary } from "../../src/shared/types";
 
 function put(path: string, email: string, body: unknown): Promise<Response> {
@@ -215,5 +217,52 @@ describe("M3 gate — sign convention from both viewers", () => {
     // …and the UI translation gives each viewer "positive = I'm owed".
     expect(viewerDelta(alexSummary.balance_cents, ALEX, L)).toBe(3149);
     expect(viewerDelta(jordanSummary.balance_cents, JORDAN, L)).toBe(-3149);
+  });
+});
+
+describe("POST /api/ledgers invites the friend", () => {
+  beforeEach(() => installMailPatch());
+  afterEach(() => removeMailPatch());
+
+  it("emails a partner invite, named after the creator, when the friend is new", async () => {
+    await put("/api/me", ALEX, { display_name: "Alex Rivera", accent_color: ACCENT_PALETTE[0] });
+    const res = await post("/api/ledgers", ALEX, { id: crypto.randomUUID(), friend_email: JORDAN });
+    expect(res.status).toBe(201);
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]!.to).toEqual([JORDAN]);
+    expect(outbox[0]!.subject).toBe("Alex Rivera started a ledger with you on Tally");
+  });
+
+  it("sends nothing when the friend already has an account, or the pair already exists", async () => {
+    await put("/api/me", JORDAN, { display_name: "Jordan", accent_color: null });
+    expect((await post("/api/ledgers", ALEX, { id: crypto.randomUUID(), friend_email: JORDAN })).status).toBe(201);
+    expect(outbox).toHaveLength(0);
+    await put("/api/me", ALEX, { display_name: "Alex", accent_color: null });
+    expect((await post("/api/ledgers", ALEX, { id: crypto.randomUUID(), friend_email: SAM })).status).toBe(201);
+    expect(outbox).toHaveLength(1);
+    expect((await post("/api/ledgers", ALEX, { id: crypto.randomUUID(), friend_email: SAM })).status).toBe(200);
+    expect(outbox).toHaveLength(1);
+  });
+});
+
+describe("POST /api/ledgers is metered", () => {
+  beforeEach(() => installMailPatch());
+  afterEach(() => removeMailPatch());
+
+  it("refuses the eleventh ledger of the day and sends no mail", async () => {
+    for (let i = 0; i < LEDGERS_PER_DAY; i++) await insertLedger(ALEX, `friend${i}@example.com`);
+    const res = await post("/api/ledgers", ALEX, { id: crypto.randomUUID(), friend_email: JORDAN });
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "slow down" });
+    expect(outbox).toHaveLength(0);
+  });
+
+  it("counts only the last 24 hours", async () => {
+    for (let i = 0; i < LEDGERS_PER_DAY; i++) await insertLedger(ALEX, `old${i}@example.com`);
+    await env.DB.prepare("UPDATE ledgers SET created_at = ?1")
+      .bind(Date.now() - 25 * 60 * 60 * 1000)
+      .run();
+    const res = await post("/api/ledgers", ALEX, { id: crypto.randomUUID(), friend_email: JORDAN });
+    expect(res.status).toBe(201);
   });
 });

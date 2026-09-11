@@ -15,6 +15,8 @@ import { DetailScreen } from "./screens/DetailScreen";
 import { ReadingScreen, type ReadingPhase } from "./screens/ReadingScreen";
 import { ConfirmScreen, type ConfirmCommit } from "./screens/ConfirmScreen";
 import { PercentScreen } from "./screens/PercentScreen";
+import { SignInScreen } from "./screens/SignInScreen";
+import { OwnerScreen } from "./screens/OwnerScreen";
 import { todayISO } from "./util";
 
 export function friendDisplayName(detail: LedgerDetail): string {
@@ -27,6 +29,7 @@ export function friendDisplayName(detail: LedgerDetail): string {
 
 type Boot =
   | { phase: "loading" }
+  | { phase: "signin" }
   | { phase: "error"; message: string }
   | { phase: "ready"; me: UserPrefs; ledgers: LedgerSummary[]; detail: LedgerDetail | null };
 
@@ -72,6 +75,7 @@ export default function App() {
   const [startAccent, setStartAccent] = useState<string>(DEFAULT_ACCENT);
   // Prefs editing after onboarding (M3 review F5): reachable from the picker.
   const [editingPrefs, setEditingPrefs] = useState(false);
+  const [viewingOwner, setViewingOwner] = useState(false);
 
   // One idempotency id per user commit intent (contract rule 4). It is
   // minted on the first attempt and reused verbatim if that attempt fails
@@ -105,19 +109,27 @@ export default function App() {
     return lastPickRef.current.id;
   };
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [me, { ledgers }] = await Promise.all([api.me(), api.ledgers()]);
-        // Exactly one ledger boots straight into it; zero or several boot
-        // into the picker (detail stays null until one is opened).
-        const only = ledgers.length === 1 ? ledgers[0]! : null;
-        const detail = only ? await api.ledger(only.id) : null;
-        setBoot({ phase: "ready", me, ledgers, detail });
-      } catch (err) {
-        setBoot({ phase: "error", message: err instanceof Error ? err.message : String(err) });
+  const load = async () => {
+    setBoot({ phase: "loading" });
+    try {
+      const [me, { ledgers }] = await Promise.all([api.me(), api.ledgers()]);
+      // Exactly one ledger boots straight into it; zero or several boot
+      // into the picker (detail stays null until one is opened).
+      const only = ledgers.length === 1 ? ledgers[0]! : null;
+      const detail = only ? await api.ledger(only.id) : null;
+      setBoot({ phase: "ready", me, ledgers, detail });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setBoot({ phase: "signin" });
+        return;
       }
-    })();
+      setBoot({ phase: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => stopScanTimer, []);
@@ -149,6 +161,19 @@ export default function App() {
 
   if (boot.phase === "loading") {
     return <Shell accent={null}>{null}</Shell>;
+  }
+  if (boot.phase === "signin") {
+    const signIn = (
+      <SignInScreen
+        desktop={isDesktop}
+        onSignedIn={() => {
+          // The URL was /login; the app lives at /. Then boot again in place.
+          window.history.replaceState(null, "", "/");
+          void load();
+        }}
+      />
+    );
+    return isDesktop ? signIn : <Shell accent={null}>{signIn}</Shell>;
   }
   if (boot.phase === "error") {
     return (
@@ -197,6 +222,21 @@ export default function App() {
     nav({ name: "ledger" });
   };
 
+  const startPrefsEdit = () => {
+    setStartAccent(me.accent_color ?? DEFAULT_ACCENT);
+    setEditingPrefs(true);
+  };
+
+  const openOwner = () => setViewingOwner(true);
+
+  const signOut = () => {
+    // Best effort: the server row is deleted; the cookie is cleared by the
+    // response. Either way the app returns to sign-in after the beat the
+    // footer uses to say "Signed out."
+    api.signOut().catch(() => {});
+    window.setTimeout(() => window.location.assign("/login"), 700);
+  };
+
   const railFor = (C: Colors): DesktopRailProps => ({
     ledgers,
     viewerEmail: me.email,
@@ -204,6 +244,11 @@ export default function App() {
     activeLedgerId: detail?.ledger.id ?? null,
     onOpen: openLedger,
     onCreate: createLedger,
+    displayName: me.display_name ?? me.email,
+    isAdmin: me.is_admin,
+    onEditPrefs: startPrefsEdit,
+    onOwnerSettings: openOwner,
+    onSignOut: signOut,
   });
 
   // ---- Onboarding: no display name yet -> prefs first (decision B) --------
@@ -244,6 +289,12 @@ export default function App() {
 
   const colors = colorsFor(me.accent_color);
 
+  // Logo/wordmark click: to the landing page (which greets a signed-in
+  // visitor with a back-to-the-app CTA instead of Sign in).
+  const goHome = () => {
+    window.location.assign("/welcome");
+  };
+
   // ---- Picker: the root screen whenever no ledger is open -----------------
   if (editingPrefs) {
     const preview = colorsFor(startAccent);
@@ -283,16 +334,19 @@ export default function App() {
     );
   }
 
-  const startPrefsEdit = () => {
-    setStartAccent(me.accent_color ?? DEFAULT_ACCENT);
-    setEditingPrefs(true);
-  };
-
-  // Logo/wordmark click: to the landing page (which greets a signed-in
-  // visitor with a back-to-the-app CTA instead of Sign in).
-  const goHome = () => {
-    window.location.assign("/welcome");
-  };
+  // ---- Owner settings: same shape as prefs editing ------------------------
+  if (viewingOwner && me.is_admin) {
+    const owner = <OwnerScreen colors={colors} onBack={() => setViewingOwner(false)} />;
+    return isDesktop ? (
+      <DesktopShell accent={colors.me} rail={railFor(colors)} onHome={goHome}>
+        {owner}
+      </DesktopShell>
+    ) : (
+      <Shell accent={colors.me} onHome={goHome}>
+        {owner}
+      </Shell>
+    );
+  }
 
   const phonePicker = (
     <Shell accent={colors.me} onHome={goHome}>
@@ -305,7 +359,11 @@ export default function App() {
         createOpenByDefault={ledgers.length === 0}
         onOpen={openLedger}
         onCreate={createLedger}
+        displayName={me.display_name ?? me.email}
+        isAdmin={me.is_admin}
         onEditPrefs={startPrefsEdit}
+        onOwnerSettings={openOwner}
+        onSignOut={signOut}
       />
     </Shell>
   );
@@ -313,7 +371,7 @@ export default function App() {
   if (!detail) {
     // Desktop: the rail IS the picker; the pane gets a quiet empty state.
     return isDesktop ? (
-      <DesktopShell accent={colors.me} rail={{ ...railFor(colors), onEditPrefs: startPrefsEdit }} onHome={goHome}>
+      <DesktopShell accent={colors.me} rail={railFor(colors)} onHome={goHome}>
         {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
         <PaneEmptyState hasLedgers={ledgers.length > 0} accent={colors.me} />
       </DesktopShell>
@@ -828,7 +886,7 @@ export default function App() {
   if (isDesktop) {
     const canDrop = screen.name === "ledger";
     return (
-      <DesktopShell accent={colors.me} rail={{ ...railFor(colors), onEditPrefs: startPrefsEdit }} onHome={goHome}>
+      <DesktopShell accent={colors.me} rail={railFor(colors)} onHome={goHome}>
         {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
         <div
           key={screenKey}

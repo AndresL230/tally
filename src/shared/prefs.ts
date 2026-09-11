@@ -17,8 +17,8 @@ export function isAccentColor(value: unknown): value is AccentColor {
   return typeof value === "string" && (ACCENT_PALETTE as readonly string[]).includes(value);
 }
 
-/** Loose but serviceable e-mail shape check (the Access policy is the real
- *  gatekeeper; this catches typos before a dead ledger gets created). */
+/** Loose but serviceable e-mail shape check (the allow-list in auth.ts is the
+ *  real gatekeeper; this catches typos before a dead ledger gets created). */
 export function looksLikeEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value) && value.length <= 254;
 }

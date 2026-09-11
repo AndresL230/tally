@@ -183,9 +183,8 @@
       </div>
     </footer>
     <script>
-      // Signed-in visitors (valid Access session) get back-to-the-app CTAs
-      // instead of Sign in. /api sits behind Access: a live session returns
-      // JSON, anything else surfaces as a redirect or non-JSON.
+      // Signed-in visitors (valid session) get back-to-the-app CTAs instead
+      // of Sign in. /api/me returns JSON when signed in, 401 otherwise.
       fetch("/api/me", { redirect: "manual" })
         .then((r) => {
           if (!r.ok || !(r.headers.get("content-type") || "").includes("json")) return;

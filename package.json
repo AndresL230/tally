@@ -9,15 +9,14 @@
     "dev:client": "vite",
     "deploy": "wrangler deploy",
     "typecheck": "tsc -p tsconfig.worker.json && tsc -p tsconfig.client.json && tsc -p tsconfig.test.json",
-    "test": "npm run typecheck && vitest run",
+    "test": "npm run build && npm run typecheck && vitest run",
     "test:watch": "vitest",
     "migrate:local": "wrangler d1 migrations apply tally --local",
     "migrate:remote": "wrangler d1 migrations apply tally --remote",
     "seed": "npm run migrate:local && wrangler d1 execute tally --local --file seed/seed.sql"
   },
   "dependencies": {
-    "hono": "^4.13.1",
-    "jose": "^6.2.8"
+    "hono": "^4.13.1"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.21.1",

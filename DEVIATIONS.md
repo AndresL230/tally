@@ -31,13 +31,13 @@ only; the device supplies its own status bar.
 Authorization on ledger-scoped routes returns 404 for both "doesn't exist"
 and "not yours", so the API doesn't confirm which ledger ids exist.
 
-## D5. DEV_ALLOW_USER local bypass
+## D5. Sign-in is the app's own (was: Cloudflare Access + DEV_ALLOW_USER)
 
-`wrangler dev` has no Access in front of it, so a `.dev.vars`-only variable
-supplies a local identity. It is honored only for localhost/127.0.0.1
-requests, documented as never-deploy, and does not exist in production
-config. The spec's "the app boots assuming an authenticated request" is
-preserved in production; this is the local stand-in.
+The spec's Cloudflare Access One-Time PIN and the local `DEV_ALLOW_USER`
+bypass are gone. The app emails its own six-digit code and keeps sessions in
+D1 (`docs/superpowers/specs/2026-09-11-email-code-auth-design.md`). Local
+development signs in for real: without `RESEND_API_KEY` the code prints to
+the wrangler terminal. There is no longer any identity bypass anywhere.
 
 ## D6. Schema is stricter than the spec's verbatim DDL
 
@@ -94,10 +94,9 @@ a muted "Edit your name and color ›" link that reopens the onboarding
 screen in edit mode. Onboarding copy generalizes the mockup's
 friend-specific lines ("what your friends see", "Their item") because at
 onboarding no friend exists yet. A ledger created with a mistyped email
-sits unused until that address is added to the Access policy — the
-policy is the real gatekeeper (rule: adding a friend = policy AND
-ledger); there is no ledger deletion, deliberately, in an append-only
-system.
+is itself the invite — ledger membership lets that address request a
+sign-in code, and a mistyped one simply never signs in; there is no ledger
+deletion, deliberately, in an append-only system.
 
 ## D11. Quantity lines expand into per-unit rows on the confirm screen
 

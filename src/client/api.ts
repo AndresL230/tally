@@ -1,4 +1,13 @@
-import type { ApiEntry, ApiItem, ApiReceipt, LedgerDetail, LedgerSummary, UserPrefs } from "../shared/types";
+import type {
+  AdminState,
+  ApiEntry,
+  ApiItem,
+  ApiReceipt,
+  LedgerDetail,
+  LedgerSummary,
+  SignupMode,
+  UserPrefs,
+} from "../shared/types";
 
 // Mutation bodies per the M1/M2 contracts. `id` is the client-generated UUID
 // idempotency key: one per user intent, reused verbatim on retries.
@@ -63,13 +72,15 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** The parsed error body ({} when there was none) — e.g. tries_left, retry_after. */
+    public body: Record<string, unknown> = {},
   ) {
     super(message);
   }
 }
 
-/** Navigate to /login (Access hosts the PIN there and bounces back into the
- *  app) — but never in a loop: at most once per 15s, else surface the error. */
+/** Navigate to /login (the app shell renders the sign-in screen there) —
+ *  but never in a loop: at most once per 15s, else surface the error. */
 function reloadForLogin(): never {
   const KEY = "tally:last-auth-reload";
   const last = Number(sessionStorage.getItem(KEY) ?? 0);
@@ -81,35 +92,26 @@ function reloadForLogin(): never {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  // redirect: "manual" — no legitimate /api route ever redirects, so ANY
-  // redirect is Cloudflare Access bouncing an expired session to its
-  // (cross-origin) login page. Following it would make the browser kill
-  // the response as a CORS failure before we could observe anything;
-  // manual mode surfaces it deterministically as an opaqueredirect.
   const res = await fetch(path, {
     ...init,
-    redirect: "manual",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
-  const contentType = res.headers.get("content-type") ?? "";
-  if (
-    res.type === "opaqueredirect" ||
-    (res.ok && !contentType.includes("application/json"))
-  ) {
-    // Expired Access session (or an HTML interloper): reload the document
-    // and let Access host login — vital in standalone/PWA mode where
-    // nothing else would ever re-trigger it.
-    reloadForLogin();
-  }
+  if (res.status === 204) return undefined as T;
   if (!res.ok) {
-    let message = res.statusText;
+    let body: Record<string, unknown> = {};
     try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) message = body.error;
+      body = (await res.json()) as Record<string, unknown>;
     } catch {
-      // keep statusText
+      // keep {}
     }
-    throw new ApiError(res.status, message);
+    const message = typeof body.error === "string" ? body.error : res.statusText;
+    // A dead session anywhere but the sign-in screen itself: go sign in.
+    // On /login the boot's 401 is the normal case, and the auth endpoints
+    // answer 4xx for their own reasons — both are surfaced, not redirected.
+    if (res.status === 401 && !path.startsWith("/api/auth/") && window.location.pathname !== "/login") {
+      reloadForLogin();
+    }
+    throw new ApiError(res.status, message, body);
   }
   return (await res.json()) as T;
 }
@@ -178,4 +180,20 @@ export const api = {
     request<ReceiptResponse>(`/api/receipts/${receiptId}/extract`, { method: "POST" }),
   discardReceipt: (receiptId: string) =>
     request<{ receipt: ApiReceipt }>(`/api/receipts/${receiptId}/discard`, { method: "POST" }),
+
+  // ---- Auth ------------------------------------------------------------
+  requestCode: (email: string) =>
+    request<{ ok: true }>("/api/auth/code", { method: "POST", body: JSON.stringify({ email }) }),
+  verifyCode: (email: string, code: string) =>
+    request<{ email: string }>("/api/auth/verify", { method: "POST", body: JSON.stringify({ email, code }) }),
+  signOut: () => request<void>("/api/auth/signout", { method: "POST" }),
+
+  // ---- Owner -----------------------------------------------------------
+  admin: () => request<AdminState>("/api/admin"),
+  setSignupMode: (mode: SignupMode) =>
+    request<{ signup_mode: SignupMode }>("/api/admin/signup-mode", { method: "PUT", body: JSON.stringify({ mode }) }),
+  invite: (email: string) =>
+    request<{ email: string }>("/api/admin/invites", { method: "POST", body: JSON.stringify({ email }) }),
+  removeInvite: (email: string) =>
+    request<void>(`/api/admin/invites/${encodeURIComponent(email)}`, { method: "DELETE" }),
 };

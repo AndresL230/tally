@@ -6,7 +6,6 @@ declare global {
     // Merged into the `env` exposed by cloudflare:test.
     interface Env extends WorkerEnv {
       TEST_MIGRATIONS: D1Migration[];
-      ACCESS_JWKS: string;
     }
   }
 }

@@ -34,13 +34,13 @@
     }
   ],
   "vars": {
-    // Cloudflare Access team domain, e.g. "myteam.cloudflareaccess.com"
-    "ACCESS_TEAM_DOMAIN": "web-1rs-pages.cloudflareaccess.com",
-    // The Access application AUD tag (Zero Trust → Access → Applications → your app → Overview)
-    "ACCESS_AUD": "d640f5add8f1f14518269321fe5796237722992a7ba1192c5ce0311f72d36775",
     // Cloudflare account id + AI Gateway id for Anthropic extraction calls (M2)
     "AI_GATEWAY_ACCOUNT_ID": "0bda3a2560ca48711ef7336cc421abed",
-    "AI_GATEWAY_ID": "tally"
+    "AI_GATEWAY_ID": "tally",
+    // Own auth: the owner (admin routes; always allowed to sign in) and the
+    // From header for sign-in / invite mail. RESEND_API_KEY is a secret.
+    "ADMIN_EMAIL": "andreslopez.23061@gmail.com",
+    "MAIL_FROM": "Tally <sign-in@tally.andresl.dev>"
   }
-  // Secrets (never in this file): ANTHROPIC_API_KEY via `wrangler secret put ANTHROPIC_API_KEY`
+  // Secrets (never in this file): ANTHROPIC_API_KEY, RESEND_API_KEY via `wrangler secret put`
 }

@@ -8,6 +8,10 @@ import { isAdmin } from "./admin";
 import { sendMail } from "./mailer";
 import { invited } from "./emails";
 
+/** Creating a ledger emails the friend, so it is metered like the codes are. */
+export const LEDGERS_PER_DAY = 10;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export function registerPrefs(app: Hono<AppContext>): void {
   // Display name + accent color; the whole users row (D1's auth data is
   // sessions/codes elsewhere — identity here is just the session's email).
@@ -60,6 +64,19 @@ export function registerPrefs(app: Hono<AppContext>): void {
       throw new ValidationError("a ledger needs two different people");
     }
     const [a, b] = orderMembers(email, friend);
+
+    // A new ledger sends mail to a stranger, so it needs the same kind of
+    // cap the code route has — otherwise one signed-in account is an
+    // unmetered way to send invitations from our domain.
+    const recent = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM ledgers
+       WHERE (person_a = ?1 OR person_b = ?1) AND created_at > ?2`,
+    )
+      .bind(email, Date.now() - DAY_MS)
+      .first<{ n: number }>();
+    if (recent && recent.n >= LEDGERS_PER_DAY) {
+      return c.json({ error: "slow down" }, 429);
+    }
 
     // Idempotent by pair: creating a ledger that already exists lands you
     // in the existing one (200), whatever id the client minted this time.

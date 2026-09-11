@@ -8,6 +8,7 @@ import { ALEX, JORDAN, SAM, OUTSIDER, insertExpense, insertLedger } from "../hel
 import { installMailPatch, outbox, removeMailPatch } from "../helpers/mail";
 import { ACCENT_PALETTE } from "../../src/shared/prefs";
 import { viewerDelta } from "../../src/shared/ledger";
+import { LEDGERS_PER_DAY } from "../../src/worker/prefs";
 import type { LedgerDetail, LedgerSummary } from "../../src/shared/types";
 
 function put(path: string, email: string, body: unknown): Promise<Response> {
@@ -241,5 +242,27 @@ describe("POST /api/ledgers invites the friend", () => {
     expect(outbox).toHaveLength(1);
     expect((await post("/api/ledgers", ALEX, { id: crypto.randomUUID(), friend_email: SAM })).status).toBe(200);
     expect(outbox).toHaveLength(1);
+  });
+});
+
+describe("POST /api/ledgers is metered", () => {
+  beforeEach(() => installMailPatch());
+  afterEach(() => removeMailPatch());
+
+  it("refuses the eleventh ledger of the day and sends no mail", async () => {
+    for (let i = 0; i < LEDGERS_PER_DAY; i++) await insertLedger(ALEX, `friend${i}@example.com`);
+    const res = await post("/api/ledgers", ALEX, { id: crypto.randomUUID(), friend_email: JORDAN });
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "slow down" });
+    expect(outbox).toHaveLength(0);
+  });
+
+  it("counts only the last 24 hours", async () => {
+    for (let i = 0; i < LEDGERS_PER_DAY; i++) await insertLedger(ALEX, `old${i}@example.com`);
+    await env.DB.prepare("UPDATE ledgers SET created_at = ?1")
+      .bind(Date.now() - 25 * 60 * 60 * 1000)
+      .run();
+    const res = await post("/api/ledgers", ALEX, { id: crypto.randomUUID(), friend_email: JORDAN });
+    expect(res.status).toBe(201);
   });
 });

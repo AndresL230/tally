@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SELF, env } from "cloudflare:test";
 import { authedFetch, sessionCookieFor } from "../helpers/auth";
-import { ALEX } from "../helpers/fixtures";
+import { ALEX, insertCode } from "../helpers/fixtures";
+import { failNextSend, installMailPatch, lastCodeFor, outbox, removeMailPatch } from "../helpers/mail";
+import { CODE_TTL_MS, MAX_ATTEMPTS } from "../../src/worker/auth";
 import {
   RENEW_BELOW_MS,
   SESSION_COOKIE,
@@ -138,6 +140,156 @@ describe("root and /login routes", () => {
     expect(anon.status).toBe(200);
     expect(await anon.text()).toContain("a private ledger for two");
     const app = await SELF.fetch(`${ORIGIN}/`, { headers: { Cookie: await sessionCookieFor(ALEX) } });
+    expect(app.status).toBe(200);
+    expect(await app.text()).toContain('<div id="root">');
+  });
+});
+
+function post(path: string, body: unknown, init: RequestInit = {}): Promise<Response> {
+  return SELF.fetch(`${ORIGIN}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(init.headers ?? {}) },
+    body: JSON.stringify(body),
+    ...init,
+  });
+}
+
+/** Cookie value from a verify response. */
+function cookieOf(res: Response): string {
+  const raw = res.headers.get("set-cookie") ?? "";
+  const m = /tally_session=([^;]+)/.exec(raw);
+  if (!m) throw new Error(`no session cookie in: ${raw}`);
+  return `tally_session=${m[1]}`;
+}
+
+describe("POST /api/auth/code + /api/auth/verify", () => {
+  beforeEach(() => installMailPatch());
+  afterEach(() => removeMailPatch());
+
+  it("emails a code, verifies it, and the cookie authenticates", async () => {
+    const sent = await post("/api/auth/code", { email: "Alex@Example.com" });
+    expect(sent.status).toBe(200);
+    expect(await sent.json()).toEqual({ ok: true });
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]!.to).toEqual([ALEX]);
+    expect(outbox[0]!.subject).toMatch(/^Your Tally code: \d{3} \d{3}$/);
+
+    const code = lastCodeFor(ALEX);
+    const ok = await post("/api/auth/verify", { email: ALEX, code: `${code.slice(0, 3)} ${code.slice(3)}` });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ email: ALEX });
+    const setCookie = ok.headers.get("set-cookie") ?? "";
+    expect(setCookie).toMatch(/^tally_session=[\w-]{43}; Path=\/; HttpOnly; SameSite=Lax; Max-Age=7776000; Secure$/);
+
+    const me = await SELF.fetch(`${ORIGIN}/api/me`, { headers: { Cookie: cookieOf(ok) } });
+    expect(me.status).toBe(200);
+    expect(await me.json()).toMatchObject({ email: ALEX });
+  });
+
+  it("rejects malformed requests", async () => {
+    expect((await post("/api/auth/code", { email: "not-an-email" })).status).toBe(400);
+    expect((await post("/api/auth/code", {})).status).toBe(400);
+    expect((await post("/api/auth/verify", { email: ALEX, code: "12345" })).status).toBe(400);
+    expect((await post("/api/auth/verify", { email: ALEX, code: "abcdef" })).status).toBe(400);
+    expect(outbox).toHaveLength(0);
+  });
+
+  it("a wrong code counts down and the fifth miss kills it", async () => {
+    await insertCode(ALEX, "111111");
+    for (let miss = 1; miss < MAX_ATTEMPTS; miss++) {
+      const res = await post("/api/auth/verify", { email: ALEX, code: "000000" });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "wrong code", tries_left: MAX_ATTEMPTS - miss });
+    }
+    const fifth = await post("/api/auth/verify", { email: ALEX, code: "000000" });
+    expect(await fifth.json()).toEqual({ error: "code expired" });
+    // Even the right code is dead now.
+    const right = await post("/api/auth/verify", { email: ALEX, code: "111111" });
+    expect(await right.json()).toEqual({ error: "code expired" });
+  });
+
+  it("a consumed code cannot be reused", async () => {
+    await insertCode(ALEX, "222222");
+    expect((await post("/api/auth/verify", { email: ALEX, code: "222222" })).status).toBe(200);
+    const again = await post("/api/auth/verify", { email: ALEX, code: "222222" });
+    expect(again.status).toBe(400);
+    expect(await again.json()).toEqual({ error: "code expired" });
+  });
+
+  it("an expired code is refused", async () => {
+    await insertCode(ALEX, "333333", { expires_at: Date.now() - 1 });
+    const res = await post("/api/auth/verify", { email: ALEX, code: "333333" });
+    expect(await res.json()).toEqual({ error: "code expired" });
+  });
+
+  it("a newer code supersedes an older live one", async () => {
+    await insertCode(ALEX, "444444", { created_at: Date.now() - 5 * 60 * 1000 });
+    expect((await post("/api/auth/code", { email: ALEX })).status).toBe(200);
+    const old = await post("/api/auth/verify", { email: ALEX, code: "444444" });
+    expect(await old.json()).toEqual({ error: "code expired" });
+    const fresh = await post("/api/auth/verify", { email: ALEX, code: lastCodeFor(ALEX) });
+    expect(fresh.status).toBe(200);
+  });
+
+  it("a code for one email does not verify another", async () => {
+    await insertCode(ALEX, "555555");
+    const res = await post("/api/auth/verify", { email: "jordan@example.com", code: "555555" });
+    expect(await res.json()).toEqual({ error: "code expired" });
+  });
+
+  it("stores only a hash, never the code", async () => {
+    await post("/api/auth/code", { email: ALEX });
+    const code = lastCodeFor(ALEX);
+    const row = await env.DB.prepare("SELECT code_hash, expires_at, created_at FROM auth_codes WHERE email = ?1")
+      .bind(ALEX)
+      .first<{ code_hash: string; expires_at: number; created_at: number }>();
+    expect(row!.code_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(row!.code_hash).not.toContain(code);
+    expect(row!.expires_at - row!.created_at).toBe(CODE_TTL_MS);
+  });
+
+  it("a mail failure rolls the code back and reports 502", async () => {
+    failNextSend(500);
+    const res = await post("/api/auth/code", { email: ALEX });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: "couldn't send the email" });
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM auth_codes").first<{ n: number }>();
+    expect(n!.n).toBe(0);
+  });
+
+  it("never logs a code when a real mailer is configured", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    await post("/api/auth/code", { email: ALEX });
+    const code = lastCodeFor(ALEX);
+    const printed = log.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(printed).not.toContain(code);
+    expect(printed).not.toContain(`${code.slice(0, 3)} ${code.slice(3)}`);
+    log.mockRestore();
+  });
+});
+
+describe("POST /api/auth/signout", () => {
+  it("deletes the session and clears the cookie", async () => {
+    const cookie = await sessionCookieFor(ALEX);
+    const out = await SELF.fetch(`${ORIGIN}/api/auth/signout`, { method: "POST", headers: { Cookie: cookie } });
+    expect(out.status).toBe(204);
+    expect(out.headers.get("set-cookie")).toMatch(/^tally_session=; Path=\/; HttpOnly; SameSite=Lax; Max-Age=0; Secure$/);
+    const after = await SELF.fetch(`${ORIGIN}/api/me`, { headers: { Cookie: cookie } });
+    expect(after.status).toBe(401);
+  });
+
+  it("requires a session", async () => {
+    const res = await SELF.fetch(`${ORIGIN}/api/auth/signout`, { method: "POST" });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /login", () => {
+  it("serves the app shell, signed in or not", async () => {
+    const anon = await SELF.fetch(`${ORIGIN}/login`);
+    expect(anon.status).toBe(200);
+    expect(await anon.text()).toContain('<div id="root">');
+    const app = await SELF.fetch(`${ORIGIN}/login?next=/x`, { headers: { Cookie: await sessionCookieFor(ALEX) } });
     expect(app.status).toBe(200);
     expect(await app.text()).toContain('<div id="root">');
   });

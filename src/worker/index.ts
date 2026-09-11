@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext } from "./env";
-import { getUser, requireUser } from "./auth";
+import { getUser, registerAuth, requireUser } from "./auth";
 import { ledgerDetail, ledgerForMember, listLedgers } from "./db";
 import { registerMutations } from "./mutations";
 import { registerReceipts } from "./receipts";
@@ -8,7 +8,11 @@ import { registerPrefs } from "./prefs";
 
 const app = new Hono<AppContext>();
 
-// Every /api/* request must carry a verified Access identity.
+// Order matters: the two routes that MINT a session are registered first,
+// so the session check below never sees them (Hono runs a matching route
+// before middleware registered after it). Everything else under /api/*
+// requires a live session.
+registerAuth(app);
 app.use("/api/*", requireUser);
 
 registerMutations(app);
@@ -36,21 +40,19 @@ app.get("/api/ledgers/:id", async (c) => {
   return c.json(await ledgerDetail(c.env.DB, ledger, email));
 });
 
-// The root has two faces: a signed-in browser (Access cookie, verified for
-// real — or the localhost dev bypass) gets the app shell; everyone else gets
-// the public landing page. The app's URL never changes.
+// The root has two faces: a signed-in browser (a live session cookie) gets
+// the app shell; everyone else gets the public landing page. The app's URL
+// never changes.
 app.get("/", async (c) => {
   const user = await getUser(c.req.raw, c.env);
   const url = new URL(user ? "/" : "/welcome", c.req.url);
   return c.env.ASSETS.fetch(new Request(url));
 });
 
-// Cloudflare Access fronts /login, so any request reaching the Worker here
-// has just authenticated — bounce it into the app (same-origin paths only).
+// /login serves the app shell; the client sees the 401 from /api/me and
+// renders the sign-in screen. (welcome.html links here.)
 app.get("/login", (c) => {
-  const next = c.req.query("next") ?? "/";
-  const dest = next.startsWith("/") && !next.startsWith("//") ? next : "/";
-  return c.redirect(dest, 302);
+  return c.env.ASSETS.fetch(new Request(new URL("/", c.req.url)));
 });
 
 app.notFound((c) => {

@@ -85,3 +85,25 @@ export async function insertSettlement(f: SettlementFixture): Promise<string> {
     .run();
   return id;
 }
+
+export interface CodeFixture {
+  created_at?: number;
+  expires_at?: number;
+  attempts?: number;
+  consumed_at?: number | null;
+}
+
+/** Insert an auth_codes row for a KNOWN code (hashed the way the worker does). */
+export async function insertCode(email: string, code: string, f: CodeFixture = {}): Promise<string> {
+  const id = uid("code");
+  const created = f.created_at ?? Date.now();
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${id}:${code}`));
+  const hash = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  await env.DB.prepare(
+    `INSERT INTO auth_codes (id, email, code_hash, created_at, expires_at, attempts, consumed_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+  )
+    .bind(id, email, hash, created, f.expires_at ?? created + 10 * 60 * 1000, f.attempts ?? 0, f.consumed_at ?? null)
+    .run();
+  return id;
+}

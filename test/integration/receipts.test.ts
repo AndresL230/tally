@@ -17,7 +17,8 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { env, SELF } from "cloudflare:test";
 import { authedFetch } from "../helpers/auth";
-import { ALEX, JORDAN, SAM, OUTSIDER, insertLedger, insertExpense } from "../helpers/fixtures";
+import { ALEX, JORDAN, SAM, OUTSIDER, insertLedger, insertExpense, insertReceipt } from "../helpers/fixtures";
+import { GLOBAL_DAILY_UPLOADS, PER_USER_DAILY_UPLOADS } from "../../src/worker/receipts";
 import { splitItems } from "../../src/shared/money";
 import type { ApiEntry, ApiItem, ApiReceipt, LedgerDetail } from "../../src/shared/types";
 
@@ -1309,5 +1310,45 @@ describe("percent/manual expenses with optional receipt_id", () => {
     const entry = ((await res.json()) as EntryResponse).entry;
     expect(entry.expense?.receipt_id).toBeNull();
     expect(entry.delta_cents).toBe(2164);
+  });
+});
+
+describe("daily scan caps", () => {
+  it("the 31st upload by one person in 24 h is refused", async () => {
+    for (let i = 0; i < PER_USER_DAILY_UPLOADS; i++) {
+      await insertReceipt({ ledger_id: ledgerId, uploaded_by: ALEX });
+    }
+    const res = await uploadReceipt(ledgerId, ALEX, fakeImage("capped"));
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "daily scan limit reached" });
+    // The other member is unaffected.
+    expect((await uploadReceipt(ledgerId, JORDAN, fakeImage("jordan-ok"))).status).toBe(201);
+  });
+
+  it("uploads older than 24 h do not count", async () => {
+    const old = Date.now() - 25 * 60 * 60 * 1000;
+    for (let i = 0; i < PER_USER_DAILY_UPLOADS; i++) {
+      await insertReceipt({ ledger_id: ledgerId, uploaded_by: ALEX, created_at: old });
+    }
+    expect((await uploadReceipt(ledgerId, ALEX, fakeImage("fresh"))).status).toBe(201);
+  });
+
+  it("a duplicate of an existing receipt is served even when capped", async () => {
+    const bytes = fakeImage("dup");
+    const first = await uploadReceipt(ledgerId, ALEX, bytes);
+    expect(first.status).toBe(201);
+    for (let i = 0; i < PER_USER_DAILY_UPLOADS; i++) {
+      await insertReceipt({ ledger_id: ledgerId, uploaded_by: ALEX });
+    }
+    const again = await uploadReceipt(ledgerId, ALEX, bytes);
+    expect(again.status).toBe(200);
+  });
+
+  it("the global cap applies across everyone", async () => {
+    for (let i = 0; i < GLOBAL_DAILY_UPLOADS; i++) {
+      await insertReceipt({ ledger_id: ledgerId, uploaded_by: `u${i}@example.com` });
+    }
+    const res = await uploadReceipt(ledgerId, ALEX, fakeImage("global"));
+    expect(res.status).toBe(429);
   });
 });

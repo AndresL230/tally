@@ -107,3 +107,23 @@ export async function insertCode(email: string, code: string, f: CodeFixture = {
     .run();
   return id;
 }
+
+export interface ReceiptFixture {
+  ledger_id: string;
+  uploaded_by: string;
+  created_at?: number;
+  sha256?: string;
+  status?: string;
+}
+
+/** A bare receipt row (no image, no items) — enough for counting. */
+export async function insertReceipt(f: ReceiptFixture): Promise<string> {
+  const id = uid("rcpt");
+  await env.DB.prepare(
+    `INSERT INTO receipts (id, ledger_id, r2_key, sha256, status, uploaded_by, created_at)
+     VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6)`,
+  )
+    .bind(id, f.ledger_id, f.sha256 ?? uid("sha"), f.status ?? "posted", f.uploaded_by, f.created_at ?? Date.now())
+    .run();
+  return id;
+}

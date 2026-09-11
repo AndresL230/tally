@@ -8,6 +8,13 @@ import { ValidationError, assertId } from "./validate";
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_BYTES = 8_000_000;
 
+// Scan caps. Upload is the choke point (extract is once-per-image), and the
+// caps exist so that opening sign-up can't turn the model key into a public
+// resource. Counted on receipts.uploaded_by / created_at; dedupes never count.
+export const PER_USER_DAILY_UPLOADS = 30;
+export const GLOBAL_DAILY_UPLOADS = 200;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 interface ReceiptRow {
   id: string;
   ledger_id: string;
@@ -135,6 +142,17 @@ export function registerReceipts(app: Hono<AppContext>): void {
         { receipt: toApi(existing), items: await itemsOf(c.env.DB, existing.id) },
         200,
       );
+    }
+
+    const dayAgo = Date.now() - DAY_MS;
+    const counts = await c.env.DB.prepare(
+      `SELECT (SELECT COUNT(*) FROM receipts WHERE uploaded_by = ?1 AND created_at > ?2) AS mine,
+              (SELECT COUNT(*) FROM receipts WHERE created_at > ?2) AS total`,
+    )
+      .bind(email, dayAgo)
+      .first<{ mine: number; total: number }>();
+    if (counts && (counts.mine >= PER_USER_DAILY_UPLOADS || counts.total >= GLOBAL_DAILY_UPLOADS)) {
+      return c.json({ error: "daily scan limit reached" }, 429);
     }
 
     // Same client id with different bytes is a collision, not a retry.

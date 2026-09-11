@@ -1,7 +1,9 @@
 // The two transactional emails, ported from the Claude Design artboards
 // (mockup/signin-account.dc.html, 2a/2b). Email-safe on purpose: inline
-// styles, system font stacks, no web fonts, and the logo as a hosted PNG —
-// Gmail strips inline SVG. Every template has an HTML and a plain-text body.
+// styles, system font stacks, no web fonts, and no images at all — the
+// brand mark is a solid accent banner with a text wordmark, so it renders
+// the same with images blocked or proxied. Every template has an HTML and
+// a plain-text body.
 
 export interface MailContent {
   subject: string;
@@ -14,11 +16,21 @@ const LOGIN_URL = `${APP_URL}/login`;
 
 const SANS = "Helvetica,Arial,sans-serif";
 const MONO = "'Courier New',monospace";
+const ACCENT = "#0a8a9b";
 
-const LOGO =
-  `<img src="${APP_URL}/icon-192.png" width="24" height="24" alt="" ` +
-  `style="display:inline-block;vertical-align:middle;border-radius:5px">` +
-  ` <span style="letter-spacing:.08em;color:#0a8a9b;font:600 13px ${MONO};vertical-align:middle">Tally</span>`;
+// Four tally strokes drawn as inline blocks (no image), then the wordmark.
+const STROKE =
+  `<span style="display:inline-block;width:3px;height:16px;background:#ffffff;` +
+  `border-radius:2px;margin-right:4px;vertical-align:middle"></span>`;
+const BANNER =
+  `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">` +
+  `<tr><td style="background:${ACCENT};padding:18px 24px;border-radius:8px 8px 0 0;text-align:left">` +
+  STROKE.repeat(4) +
+  `<span style="display:inline-block;margin-left:8px;color:#ffffff;font:600 15px ${MONO};` +
+  `letter-spacing:.08em;vertical-align:middle">Tally</span>` +
+  `<span style="display:inline-block;margin-left:12px;color:rgba(255,255,255,.75);font:400 12px ${SANS};` +
+  `vertical-align:middle">a private ledger for two</span>` +
+  `</td></tr></table>`;
 
 function escapeHtml(s: string): string {
   return s
@@ -30,9 +42,12 @@ function escapeHtml(s: string): string {
 
 function shell(inner: string, align: "center" | "left"): string {
   return (
-    `<!doctype html><html><body style="margin:0;padding:0;background:#ffffff">` +
-    `<div style="max-width:480px;margin:0 auto;padding:30px 24px 28px;text-align:${align};` +
-    `font-family:${SANS};color:#211f1c">${inner}</div></body></html>`
+    `<!doctype html><html><head><meta charset="utf-8"></head>` +
+    `<body style="margin:0;padding:0;background:#f2efe7">` +
+    `<div style="max-width:480px;margin:0 auto;padding:28px 16px">` +
+    BANNER +
+    `<div style="background:#ffffff;border-radius:0 0 8px 8px;padding:30px 24px 28px;text-align:${align};` +
+    `font-family:${SANS};color:#211f1c">${inner}</div></div></body></html>`
   );
 }
 
@@ -46,8 +61,7 @@ export function signInCode(code: string): MailContent {
   return {
     subject: `Your Tally code: ${shown}`,
     html: shell(
-      `<div>${LOGO}</div>` +
-        `<div style="margin-top:22px;background:#fbfaf6;border:1px solid rgba(0,0,0,.09);border-radius:6px;` +
+      `<div style="margin-top:4px;background:#fbfaf6;border:1px solid rgba(0,0,0,.09);border-radius:6px;` +
         `padding:26px 10px;font:600 40px ${MONO};color:#211f1c;letter-spacing:.04em">${shown}</div>` +
         `<div style="margin-top:16px;font:400 15px ${SANS};line-height:1.5;color:#4a453d">` +
         `This code works for 10 minutes and can be used once.</div>` +
@@ -75,8 +89,7 @@ export function invited(rawInviterName: string | null): MailContent {
   return {
     subject,
     html: shell(
-      `<div>${LOGO}</div>` +
-        `<div style="margin-top:24px;font-family:Georgia,serif;font-size:28px;line-height:1.15;color:#211f1c">${heading}</div>` +
+      `<div style="margin-top:4px;font-family:Georgia,serif;font-size:28px;line-height:1.15;color:#211f1c">${heading}</div>` +
         `<div style="margin-top:14px;font:400 15px ${SANS};line-height:1.55;color:#4a453d">${pitch}</div>` +
         `<div style="margin-top:26px"><a href="${LOGIN_URL}" style="display:inline-block;background:#0a8a9b;` +
         `color:#ffffff;font:600 15px ${SANS};padding:16px 28px;border-radius:14px;text-decoration:none">Open Tally</a></div>` +

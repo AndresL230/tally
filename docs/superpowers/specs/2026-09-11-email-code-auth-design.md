@@ -189,9 +189,8 @@ same bytes never counts), two counts on the existing `receipts.uploaded_by` /
   "Open Tally" button to `https://tally.andresl.dev/login`.
 
 Both have HTML and plain-text bodies (artboards 2a/2b give the exact
-markup and copy). The logo is a hosted PNG — Gmail strips inline SVG — the
-existing `icon-192.png` (already served from `src/client/public/`), no new
-asset; email-safe fonts only (Georgia / Helvetica, Arial / Courier New). Sent: the code on `/auth/code`; the
+markup and copy). The brand mark is a solid accent banner with a text wordmark — no images
+at all, so it survives image blocking and proxying;
 invite on an owner invite, and on `POST /api/ledgers` when the friend has no
 `users` row yet.
 

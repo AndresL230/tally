@@ -17,5 +17,9 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM receipts"),
     env.DB.prepare("DELETE FROM ledgers"),
     env.DB.prepare("DELETE FROM users"),
+    env.DB.prepare("DELETE FROM invites"),
+    env.DB.prepare("DELETE FROM auth_codes"),
+    env.DB.prepare("DELETE FROM sessions"),
+    env.DB.prepare("DELETE FROM settings"),
   ]);
 });

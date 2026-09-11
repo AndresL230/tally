@@ -39,6 +39,11 @@ export default defineConfig(async () => {
             // the default, as on a fresh deployment.
             AI_GATEWAY_ACCOUNT_ID: "test-account",
             AI_GATEWAY_ID: "test-gw",
+            // Own auth. RESEND_API_KEY is deliberately NOT bound: the mailer
+            // then logs instead of fetching, so no suite touches the network.
+            // Auth tests set it via env mutation and patch fetch (helpers/mail).
+            ADMIN_EMAIL: "admin@example.com",
+            MAIL_FROM: "Tally <sign-in@tally.test>",
           },
         },
       }),

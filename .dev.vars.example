@@ -1,7 +1,9 @@
 # Copy to .dev.vars for local development (never committed, never deployed).
 #
-# DEV_ALLOW_USER bypasses Access verification for LOCALHOST requests only,
-# because wrangler dev has no Cloudflare Access in front of it. The seed data
-# uses alex@example.com as the primary viewer.
-# NEVER set this variable on a deployed Worker.
-DEV_ALLOW_USER=alex@example.com
+# Nothing here is required. Without RESEND_API_KEY the Worker prints sign-in
+# codes and invite mail to the wrangler terminal instead of sending them.
+#
+# ADMIN_EMAIL overrides the wrangler.jsonc owner locally so the seeded viewer
+# (alex@example.com) sees the owner settings screen.
+ADMIN_EMAIL=alex@example.com
+# RESEND_API_KEY=re_...

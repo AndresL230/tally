@@ -36,6 +36,21 @@ describe("migrations from zero", () => {
     // duplicate pair rejected
     await expect(insertLedger(ALEX, JORDAN, "L1-dupe")).rejects.toThrow();
   });
+
+  it("creates the auth tables (0003)", async () => {
+    const { results } = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+    ).all<{ name: string }>();
+    const names = results.map((r) => r.name);
+    for (const t of ["invites", "auth_codes", "sessions", "settings"]) {
+      expect(names).toContain(t);
+    }
+    // Only the newest code per email is live; the index makes that lookup cheap.
+    const idx = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_auth_codes_email'",
+    ).first<{ name: string }>();
+    expect(idx?.name).toBe("idx_auth_codes_email");
+  });
 });
 
 describe("ledger endpoints", () => {

@@ -212,6 +212,35 @@ describe("POST /api/auth/code + /api/auth/verify", () => {
     expect(await right.json()).toEqual({ error: "code expired" });
   });
 
+  it("counts concurrent wrong guesses in the database, not in JS", async () => {
+    const id = await insertCode(ALEX, "111111");
+    const misses = await Promise.all(
+      Array.from({ length: 20 }, () => post("/api/auth/verify", { email: ALEX, code: "000000" })),
+    );
+    for (const res of misses) expect(res.status).toBe(400);
+    const row = await env.DB.prepare("SELECT attempts FROM auth_codes WHERE id = ?1")
+      .bind(id)
+      .first<{ attempts: number }>();
+    expect(row!.attempts).toBe(MAX_ATTEMPTS); // not 1: every guess is counted
+    const right = await post("/api/auth/verify", { email: ALEX, code: "111111" });
+    expect(right.status).toBe(400);
+    expect(await right.json()).toEqual({ error: "code expired" });
+  });
+
+  it("two simultaneous correct submissions mint exactly one session", async () => {
+    await insertCode(ALEX, "246813");
+    const both = await Promise.all([
+      post("/api/auth/verify", { email: ALEX, code: "246813" }),
+      post("/api/auth/verify", { email: ALEX, code: "246813" }),
+    ]);
+    const statuses = both.map((r) => r.status).sort();
+    expect(statuses).toEqual([200, 400]);
+    const loser = both.find((r) => r.status === 400)!;
+    expect(await loser.json()).toEqual({ error: "code expired" });
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM sessions").first<{ n: number }>();
+    expect(n!.n).toBe(1);
+  });
+
   it("a consumed code cannot be reused", async () => {
     await insertCode(ALEX, "222222");
     expect((await post("/api/auth/verify", { email: ALEX, code: "222222" })).status).toBe(200);

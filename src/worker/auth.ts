@@ -222,17 +222,33 @@ export function registerAuth(app: Hono<AppContext>): void {
           return c.json({ error: "code expired" }, 400);
         }
       }
-      const attempts = row.attempts + 1;
-      await db.prepare("UPDATE auth_codes SET attempts = ?2 WHERE id = ?1").bind(row.id, attempts).run();
+      // Count in the database, not in JS: concurrent guesses that all read
+      // the same `attempts` would otherwise all write the same value back,
+      // giving a guesser unlimited tries for the price of one.
+      const bump = await db
+        .prepare("UPDATE auth_codes SET attempts = attempts + 1 WHERE id = ?1 AND attempts < ?2")
+        .bind(row.id, MAX_ATTEMPTS)
+        .run();
+      if (bump.meta.changes === 0) return c.json({ error: "code expired" }, 400);
+      const after = await db
+        .prepare("SELECT attempts FROM auth_codes WHERE id = ?1")
+        .bind(row.id)
+        .first<{ attempts: number }>();
+      const attempts = after?.attempts ?? MAX_ATTEMPTS;
       if (attempts >= MAX_ATTEMPTS) return c.json({ error: "code expired" }, 400);
       return c.json({ error: "wrong code", tries_left: MAX_ATTEMPTS - attempts }, 400);
     }
 
-    await db.batch([
-      db.prepare("UPDATE auth_codes SET consumed_at = ?2 WHERE id = ?1").bind(row.id, now),
-      // Housekeeping: expired sessions go when a new one is minted.
-      db.prepare("DELETE FROM sessions WHERE expires_at <= ?1").bind(now),
-    ]);
+    // Single use, enforced by the database: the row goes from unconsumed to
+    // consumed exactly once, so two simultaneous correct submissions mint
+    // one session, not two.
+    const consumed = await db
+      .prepare("UPDATE auth_codes SET consumed_at = ?2 WHERE id = ?1 AND consumed_at IS NULL")
+      .bind(row.id, now)
+      .run();
+    if (consumed.meta.changes !== 1) return c.json({ error: "code expired" }, 400);
+    // Housekeeping: expired sessions go when a new one is minted.
+    await db.prepare("DELETE FROM sessions WHERE expires_at <= ?1").bind(now).run();
     const token = await createSession(db, email, now);
     c.header("Set-Cookie", sessionCookie(token, isSecure(c.req.raw)));
     return c.json({ email });

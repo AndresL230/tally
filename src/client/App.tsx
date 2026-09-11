@@ -220,6 +220,22 @@ export default function App() {
     nav({ name: "ledger" });
   };
 
+  const startPrefsEdit = () => {
+    setStartAccent(me.accent_color ?? DEFAULT_ACCENT);
+    setEditingPrefs(true);
+  };
+
+  // Task 10 wires this to `viewingOwner` state; a no-op placeholder for now.
+  const openOwner = () => {};
+
+  const signOut = () => {
+    // Best effort: the server row is deleted; the cookie is cleared by the
+    // response. Either way the app returns to sign-in after the beat the
+    // footer uses to say "Signed out."
+    api.signOut().catch(() => {});
+    window.setTimeout(() => window.location.assign("/login"), 700);
+  };
+
   const railFor = (C: Colors): DesktopRailProps => ({
     ledgers,
     viewerEmail: me.email,
@@ -227,6 +243,11 @@ export default function App() {
     activeLedgerId: detail?.ledger.id ?? null,
     onOpen: openLedger,
     onCreate: createLedger,
+    displayName: me.display_name ?? me.email,
+    isAdmin: me.is_admin,
+    onEditPrefs: startPrefsEdit,
+    onOwnerSettings: openOwner,
+    onSignOut: signOut,
   });
 
   // ---- Onboarding: no display name yet -> prefs first (decision B) --------
@@ -306,11 +327,6 @@ export default function App() {
     );
   }
 
-  const startPrefsEdit = () => {
-    setStartAccent(me.accent_color ?? DEFAULT_ACCENT);
-    setEditingPrefs(true);
-  };
-
   // Logo/wordmark click: to the landing page (which greets a signed-in
   // visitor with a back-to-the-app CTA instead of Sign in).
   const goHome = () => {
@@ -328,7 +344,11 @@ export default function App() {
         createOpenByDefault={ledgers.length === 0}
         onOpen={openLedger}
         onCreate={createLedger}
+        displayName={me.display_name ?? me.email}
+        isAdmin={me.is_admin}
         onEditPrefs={startPrefsEdit}
+        onOwnerSettings={openOwner}
+        onSignOut={signOut}
       />
     </Shell>
   );
@@ -336,7 +356,7 @@ export default function App() {
   if (!detail) {
     // Desktop: the rail IS the picker; the pane gets a quiet empty state.
     return isDesktop ? (
-      <DesktopShell accent={colors.me} rail={{ ...railFor(colors), onEditPrefs: startPrefsEdit }} onHome={goHome}>
+      <DesktopShell accent={colors.me} rail={railFor(colors)} onHome={goHome}>
         {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
         <PaneEmptyState hasLedgers={ledgers.length > 0} accent={colors.me} />
       </DesktopShell>
@@ -851,7 +871,7 @@ export default function App() {
   if (isDesktop) {
     const canDrop = screen.name === "ledger";
     return (
-      <DesktopShell accent={colors.me} rail={{ ...railFor(colors), onEditPrefs: startPrefsEdit }} onHome={goHome}>
+      <DesktopShell accent={colors.me} rail={railFor(colors)} onHome={goHome}>
         {flash && <FlashNote accent={colors.me}>{flash}</FlashNote>}
         <div
           key={screenKey}

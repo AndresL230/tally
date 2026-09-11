@@ -1,6 +1,7 @@
 import type { LedgerSummary } from "../../shared/types";
-import { ARCHIVO, INK, MUTED_1, MUTED_3, SERIF, type Colors } from "../theme";
+import { ARCHIVO, INK, MUTED_1, SERIF, type Colors } from "../theme";
 import { LedgerRows, NewLedgerControl } from "../components/LedgerNav";
+import { AccountArea } from "../components/AccountArea";
 
 export interface PickerScreenProps {
   ledgers: LedgerSummary[];
@@ -13,8 +14,12 @@ export interface PickerScreenProps {
   onOpen: (ledger: LedgerSummary) => void;
   /** Resolves on success (the app navigates away); throws ApiError on rejection. */
   onCreate: (email: string) => Promise<void>;
+  displayName: string;
+  isAdmin: boolean;
   /** Reopen the prefs screen (name + color) in edit mode. */
-  onEditPrefs?: () => void;
+  onEditPrefs: () => void;
+  onOwnerSettings: () => void;
+  onSignOut: () => void;
 }
 
 export function PickerScreen({
@@ -25,7 +30,11 @@ export function PickerScreen({
   createOpenByDefault,
   onOpen,
   onCreate,
+  displayName,
+  isAdmin,
   onEditPrefs,
+  onOwnerSettings,
+  onSignOut,
 }: PickerScreenProps) {
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "14px 24px 22px" }}>
@@ -61,34 +70,14 @@ export function PickerScreen({
         <div style={{ marginTop: ledgers.length > 0 ? 10 : 0 }}>
           <NewLedgerControl colors={C} openByDefault={createOpenByDefault} onCreate={onCreate} />
 
-          {onEditPrefs && (
-            <button
-              onClick={onEditPrefs}
-              style={{
-                marginTop: 22,
-                border: 0,
-                background: "transparent",
-                padding: 0,
-                font: `500 13px ${ARCHIVO}`,
-                color: MUTED_3,
-                cursor: "pointer",
-              }}
-            >
-              Edit your name and color ›
-            </button>
-          )}
-          <a
-            href="/welcome"
-            style={{
-              display: "inline-block",
-              marginTop: 12,
-              font: `500 13px ${ARCHIVO}`,
-              color: MUTED_3,
-              textDecoration: "none",
-            }}
-          >
-            About Tally ›
-          </a>
+          <AccountArea
+            colors={C}
+            displayName={displayName}
+            isAdmin={isAdmin}
+            onEditPrefs={onEditPrefs}
+            onOwnerSettings={onOwnerSettings}
+            onSignOut={onSignOut}
+          />
         </div>
       </div>
     </div>

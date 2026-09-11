@@ -137,7 +137,11 @@ export const STATES: GalleryState[] = [
         activeLedgerId="led-jordan"
         onOpen={log("open ledger")}
         onCreate={logAsync("create ledger")}
+        displayName="Alex Rivera"
+        isAdmin
         onEditPrefs={log("edit prefs")}
+        onOwnerSettings={log("owner settings")}
+        onSignOut={log("sign out")}
       />
     ),
   },

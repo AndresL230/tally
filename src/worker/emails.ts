@@ -67,12 +67,12 @@ export function signInCode(code: string): MailContent {
         `<div style="margin-top:16px;font:400 15px ${SANS};line-height:1.5;color:#4a453d">` +
         `This code works for 10 minutes and can be used once.</div>` +
         `<div style="margin-top:26px;font:400 12px ${SANS};line-height:1.5;color:#8a857c">` +
-        `If you didn't ask for this, you can ignore it — nobody can sign in without the code.</div>`,
+        `If you didn't ask for this, you can ignore it. Nobody can sign in without the code.</div>`,
       "center",
     ),
     text:
       `TALLY\n\nYour code: ${shown}\n\nIt works for 10 minutes and can be used once.\n\n` +
-      `If you didn't ask for this, you can ignore it —\nnobody can sign in without the code.\n`,
+      `If you didn't ask for this, you can ignore it.\nNobody can sign in without the code.\n`,
   };
 }
 
@@ -86,7 +86,7 @@ export function invited(rawInviterName: string | null): MailContent {
   const headingText = inviterName ? `${inviterName} started a ledger with you.` : "You've been invited to Tally.";
   const subject = inviterName ? `${inviterName} started a ledger with you on Tally` : "You've been invited to Tally";
   const pitch = "One ledger, two people. Photograph the receipt, tap what was yours, settle when it suits you.";
-  const footer = "You'll sign in with this email address and a one-time code — no password.";
+  const footer = "You'll sign in with this email address and a one-time code. No password.";
   return {
     subject,
     html: shell(

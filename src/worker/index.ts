@@ -5,6 +5,7 @@ import { ledgerDetail, ledgerForMember, listLedgers } from "./db";
 import { registerMutations } from "./mutations";
 import { registerReceipts } from "./receipts";
 import { registerPrefs } from "./prefs";
+import { isAdmin, registerAdmin } from "./admin";
 
 const app = new Hono<AppContext>();
 
@@ -18,6 +19,7 @@ app.use("/api/*", requireUser);
 registerMutations(app);
 registerReceipts(app);
 registerPrefs(app);
+registerAdmin(app);
 
 app.get("/api/me", async (c) => {
   const email = c.get("email");
@@ -26,7 +28,10 @@ app.get("/api/me", async (c) => {
   )
     .bind(email)
     .first<{ email: string; display_name: string | null; accent_color: string | null }>();
-  return c.json(row ?? { email, display_name: null, accent_color: null });
+  return c.json({
+    ...(row ?? { email, display_name: null, accent_color: null }),
+    is_admin: isAdmin(c.env, email),
+  });
 });
 
 app.get("/api/ledgers", async (c) => {

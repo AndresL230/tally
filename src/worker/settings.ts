@@ -1,6 +1,7 @@
 // App-wide switches in the `settings` key/value table.
 
-export type SignupMode = "invite" | "open";
+import type { SignupMode } from "../shared/types";
+export type { SignupMode };
 
 /** 'invite' unless the owner has explicitly opened sign-up. */
 export async function getSignupMode(db: D1Database): Promise<SignupMode> {

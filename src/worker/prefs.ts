@@ -4,6 +4,9 @@ import { orderMembers } from "../shared/ledger";
 import { isAccentColor, looksLikeEmail } from "../shared/prefs";
 import { listLedgers } from "./db";
 import { ValidationError, assertId, assertString, readJson } from "./validate";
+import { isAdmin } from "./admin";
+import { sendMail } from "./mailer";
+import { invited } from "./emails";
 
 export function registerPrefs(app: Hono<AppContext>): void {
   // Display name + accent color; the whole users row (D1 stores no auth
@@ -38,12 +41,12 @@ export function registerPrefs(app: Hono<AppContext>): void {
     )
       .bind(email, displayName, accent, Date.now())
       .run();
-    return c.json({ email, display_name: displayName, accent_color: accent });
+    return c.json({ email, display_name: displayName, accent_color: accent, is_admin: isAdmin(c.env, email) });
   });
 
-  // New ledger = the friend's email. The other half of adding a friend is
-  // the Access policy (documented in README) — this route only
-  // creates the pair.
+  // New ledger = the friend's email. That IS the invite: ledger membership
+  // lets them request a sign-in code, and a new friend gets an email saying
+  // so. Mail is best-effort here — the ledger exists either way.
   app.post("/api/ledgers", async (c) => {
     const email = c.get("email");
     const body = await readJson(c.req.raw);
@@ -78,6 +81,22 @@ export function registerPrefs(app: Hono<AppContext>): void {
       // Our insert didn't land and the pair doesn't exist: the id is used
       // by some other ledger.
       return c.json({ error: "id already used" }, 409);
+    }
+
+    if (insert.meta.changes === 1) {
+      const friendRow = await c.env.DB.prepare("SELECT 1 AS ok FROM users WHERE email = ?1")
+        .bind(friend)
+        .first<{ ok: number }>();
+      if (!friendRow) {
+        const me = await c.env.DB.prepare("SELECT display_name FROM users WHERE email = ?1")
+          .bind(email)
+          .first<{ display_name: string | null }>();
+        try {
+          await sendMail(c.env, { to: friend, ...invited(me?.display_name ?? null) });
+        } catch (err) {
+          console.error("invite mail failed", err);
+        }
+      }
     }
 
     const summaries = await listLedgers(c.env.DB, email);

@@ -224,15 +224,18 @@ export function SignInScreen({ desktop, onSignedIn }: SignInScreenProps) {
         style={{
           flex: 1,
           textAlign: "center",
-          font: `500 32px ${MONO}`,
+          font: `500 32px/1.2 ${MONO}`,
           color: INK,
           minWidth: 30,
+          // An empty slot still gets a full line box (the NBSP below), so
+          // the row doesn't jump to height when the first digit lands.
+          lineHeight: 1.2,
           paddingBottom: i === active && !err ? 7 : 8,
           borderBottom: i === active && !err ? `2px solid ${ACCENT}` : "1px solid rgba(0,0,0,.25)",
           background: err?.kind === "wrong" ? "rgba(10,138,155,.16)" : "transparent",
         }}
       >
-        {code[i] ?? " "}
+        {code[i] ?? "\u00a0"}
       </span>
     );
     content = (

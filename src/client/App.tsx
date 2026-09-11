@@ -15,6 +15,7 @@ import { DetailScreen } from "./screens/DetailScreen";
 import { ReadingScreen, type ReadingPhase } from "./screens/ReadingScreen";
 import { ConfirmScreen, type ConfirmCommit } from "./screens/ConfirmScreen";
 import { PercentScreen } from "./screens/PercentScreen";
+import { SignInScreen } from "./screens/SignInScreen";
 import { todayISO } from "./util";
 
 export function friendDisplayName(detail: LedgerDetail): string {
@@ -27,6 +28,7 @@ export function friendDisplayName(detail: LedgerDetail): string {
 
 type Boot =
   | { phase: "loading" }
+  | { phase: "signin" }
   | { phase: "error"; message: string }
   | { phase: "ready"; me: UserPrefs; ledgers: LedgerSummary[]; detail: LedgerDetail | null };
 
@@ -105,19 +107,27 @@ export default function App() {
     return lastPickRef.current.id;
   };
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [me, { ledgers }] = await Promise.all([api.me(), api.ledgers()]);
-        // Exactly one ledger boots straight into it; zero or several boot
-        // into the picker (detail stays null until one is opened).
-        const only = ledgers.length === 1 ? ledgers[0]! : null;
-        const detail = only ? await api.ledger(only.id) : null;
-        setBoot({ phase: "ready", me, ledgers, detail });
-      } catch (err) {
-        setBoot({ phase: "error", message: err instanceof Error ? err.message : String(err) });
+  const load = async () => {
+    setBoot({ phase: "loading" });
+    try {
+      const [me, { ledgers }] = await Promise.all([api.me(), api.ledgers()]);
+      // Exactly one ledger boots straight into it; zero or several boot
+      // into the picker (detail stays null until one is opened).
+      const only = ledgers.length === 1 ? ledgers[0]! : null;
+      const detail = only ? await api.ledger(only.id) : null;
+      setBoot({ phase: "ready", me, ledgers, detail });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setBoot({ phase: "signin" });
+        return;
       }
-    })();
+      setBoot({ phase: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => stopScanTimer, []);
@@ -149,6 +159,19 @@ export default function App() {
 
   if (boot.phase === "loading") {
     return <Shell accent={null}>{null}</Shell>;
+  }
+  if (boot.phase === "signin") {
+    const signIn = (
+      <SignInScreen
+        desktop={isDesktop}
+        onSignedIn={() => {
+          // The URL was /login; the app lives at /. Then boot again in place.
+          window.history.replaceState(null, "", "/");
+          void load();
+        }}
+      />
+    );
+    return isDesktop ? signIn : <Shell accent={null}>{signIn}</Shell>;
   }
   if (boot.phase === "error") {
     return (

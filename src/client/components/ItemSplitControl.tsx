@@ -19,6 +19,8 @@ export interface ItemSplitControlProps {
   /** Integer cents. The viewer's share. */
   viewerCents: number;
   onViewerCents: (cents: number) => void;
+  /** A quick button picks a share AND is done: the card should fold away. */
+  onPick?: (cents: number) => void;
   /** For the slider's accessible name. */
   label: string;
   /** Folding away: play the closing animation, then call onClosed. */
@@ -69,13 +71,20 @@ export function ItemSplitControl({
   priceCents,
   viewerCents,
   onViewerCents,
+  onPick,
   label,
   closing = false,
   onClosed,
 }: ItemSplitControlProps) {
   const viewerPct = centsToPercent(viewerCents, priceCents);
   const friendPct = 100 - viewerPct;
-  const setViewerPct = (pct: number) => onViewerCents(priceCents - percentShare(priceCents, 100 - pct));
+  const centsAt = (pct: number) => priceCents - percentShare(priceCents, 100 - pct);
+  const setViewerPct = (pct: number) => onViewerCents(centsAt(pct));
+  const pick = (pct: number) => {
+    const cents = centsAt(pct);
+    onViewerCents(cents);
+    onPick?.(cents);
+  };
 
   return (
     <div
@@ -128,7 +137,7 @@ export function ItemSplitControl({
 
       <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
         {[25, 50, 75].map((pct) => (
-          <button key={pct} onClick={() => setViewerPct(pct)} style={quickBtn(viewerPct === pct, C.me)}>
+          <button key={pct} onClick={() => pick(pct)} style={quickBtn(viewerPct === pct, C.me)}>
             {pct}% yours
           </button>
         ))}

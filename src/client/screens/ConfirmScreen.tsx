@@ -686,6 +686,7 @@ export function ConfirmScreen({
                 priceCents={i.price_cents}
                 viewerCents={i.custom}
                 onViewerCents={(cents) => setCustom(i.key, cents)}
+                onPick={(cents) => closeSplitCard({ ...i, custom: cents })}
               />
             ) : splitClosing?.key === i.key ? (
               <ItemSplitControl

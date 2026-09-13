@@ -77,7 +77,9 @@ export function splitPriceCents(lineCents: number, n: number): number[] {
  * still posts. Expanded rows keep the label, DROP the qty suffix (three
  * rows each reading "Boba Tea ×3" would lie), copy assigned_to, and get
  * stable derived ids `${id}#1..#n` ("#" never appears in the UUID ids the
- * API mints, so derived ids cannot collide with real ones).
+ * API mints, so derived ids cannot collide with real ones). A line carrying
+ * a custom share_cents passes through untouched: a cut of the whole line
+ * cannot be spread over its units without inventing a rounding rule.
  */
 export function expandQtyItems(items: readonly ApiItem[]): ApiItem[] {
   const out: ApiItem[] = [];
@@ -92,7 +94,8 @@ export function expandQtyItems(items: readonly ApiItem[]): ApiItem[] {
       out.length + n + remaining <= MAX_EXPANDED_ITEMS &&
       item.price_cents !== null &&
       Number.isSafeInteger(item.price_cents) &&
-      item.price_cents >= 0
+      item.price_cents >= 0 &&
+      item.share_cents === null
     ) {
       const unitPrices = splitPriceCents(item.price_cents, n);
       for (let k = 0; k < n; k++) {
@@ -102,6 +105,7 @@ export function expandQtyItems(items: readonly ApiItem[]): ApiItem[] {
           qty: null,
           price_cents: unitPrices[k]!,
           assigned_to: item.assigned_to,
+          share_cents: null,
         });
       }
     } else {

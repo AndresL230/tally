@@ -36,6 +36,8 @@ interface FixtureItem {
   price_cents: number;
   /** Canonical: VIEWER | FRIEND | 'half' (decision D). */
   assigned_to: string;
+  /** Custom split: assigned_to's exact cents of the item. */
+  share_cents?: number;
 }
 
 let createdAt = 1000;
@@ -48,6 +50,7 @@ function apiItems(items: FixtureItem[]): ApiItem[] {
     qty: i.qty ?? null,
     price_cents: i.price_cents,
     assigned_to: i.assigned_to,
+    share_cents: i.share_cents ?? null,
   }));
 }
 
@@ -63,7 +66,7 @@ function itemsExpense(
 ): Proto {
   const other = payer === VIEWER ? FRIEND : VIEWER;
   const split = splitItems(
-    items.map((i) => ({ price_cents: i.price_cents, assigned_to: i.assigned_to })),
+    items.map((i) => ({ price_cents: i.price_cents, assigned_to: i.assigned_to, share_cents: i.share_cents ?? null })),
     payer,
     other,
     totalCents,
@@ -202,7 +205,8 @@ const SAFEWAY_ITEMS: FixtureItem[] = [
   { label: "Chicken thighs", price_cents: 1420, assigned_to: FRIEND },
   { label: "Cold brew", price_cents: 1199, assigned_to: FRIEND },
   { label: "Eggs", qty: "×2", price_cents: 998, assigned_to: "half" },
-  { label: "Olive oil", price_cents: 1849, assigned_to: "half" },
+  // A custom split: alex (the viewer) pays $6.00 of the $18.49.
+  { label: "Olive oil", price_cents: 1849, assigned_to: VIEWER, share_cents: 600 },
   { label: "Rice, 5lb", price_cents: 1275, assigned_to: FRIEND },
   { label: "Yogurt", price_cents: 649, assigned_to: VIEWER },
   { label: "Frozen dumplings", qty: "×2", price_cents: 1298, assigned_to: FRIEND },
@@ -338,14 +342,21 @@ const NONGS_ITEMS: { label: string; qty: string | null; price_cents: number }[] 
   { label: "Fresh spring rolls", qty: null, price_cents: 575 },
 ];
 
-function nongsApiItems(assigned: (string | null)[]): ApiItem[] {
-  return NONGS_ITEMS.map((i, n) => ({
-    id: `nongs-${n + 1}-${assigned[n] ?? "unassigned"}`,
-    label: i.label,
-    qty: i.qty,
-    price_cents: i.price_cents,
-    assigned_to: assigned[n] ?? null,
-  }));
+type NongsAssign = string | null | { to: string; share: number };
+
+function nongsApiItems(assigned: NongsAssign[]): ApiItem[] {
+  return NONGS_ITEMS.map((i, n) => {
+    const a = assigned[n] ?? null;
+    const to = a === null ? null : typeof a === "string" ? a : a.to;
+    return {
+      id: `nongs-${n + 1}-${to ?? "unassigned"}`,
+      label: i.label,
+      qty: i.qty,
+      price_cents: i.price_cents,
+      assigned_to: to,
+      share_cents: a !== null && typeof a === "object" ? a.share : null,
+    };
+  });
 }
 
 export const nongsReceipt: ApiReceipt = {
@@ -365,7 +376,7 @@ export const nongsItemsMixed: ApiItem[] = nongsApiItems([
   FRIEND, // Fried chicken thigh
   VIEWER, // Papaya salad
   "half", // Thai iced tea ×2
-  FRIEND, // Sticky rice
+  { to: VIEWER, share: 125 }, // Sticky rice — a custom split, alex pays $1.25 of $4.25
   FRIEND, // Fresh spring rolls
 ]);
 

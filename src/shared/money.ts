@@ -6,6 +6,10 @@ export interface SplitItem {
   price_cents: number;
   /** Canonical: otherEmail | payerEmail | 'half'. */
   assigned_to: string;
+  /** A custom split: the person in assigned_to pays exactly this many cents
+   *  of the item and the other member pays the rest. NULL or absent means
+   *  the whole item. Never set on a 'half' item. */
+  share_cents?: number | null;
 }
 
 export interface SplitResult {
@@ -37,6 +41,8 @@ export function divRoundHalfUp(num: number, den: number): number {
  * Split an itemized receipt between payer and other.
  * - 'half' items are accumulated in HALF-CENT UNITS and rounded once at the
  *   end (never per item).
+ * - share_cents items are exact: the named member's cents (or, for the
+ *   payer, the price minus them) join the accumulator as whole cents.
  * - extra = total - items subtotal (may be negative: discounts). The other
  *   person's extra share is rounded; the payer absorbs the remainder.
  */
@@ -59,11 +65,22 @@ export function splitItems(
       throw new Error("item price_cents must be a non-negative integer");
     }
     subtotal += item.price_cents;
+    const share = item.share_cents ?? null;
+    if (share !== null) {
+      if (!Number.isSafeInteger(share) || share < 0 || share > item.price_cents) {
+        throw new Error("share_cents must be an integer between 0 and price_cents");
+      }
+      if (item.assigned_to === "half") {
+        throw new Error("share_cents cannot be set on a 'half' item");
+      }
+    }
     if (item.assigned_to === otherEmail) {
-      otherHalfUnits += 2 * item.price_cents;
+      otherHalfUnits += 2 * (share ?? item.price_cents);
     } else if (item.assigned_to === "half") {
       otherHalfUnits += item.price_cents;
-    } else if (item.assigned_to !== payerEmail) {
+    } else if (item.assigned_to === payerEmail) {
+      if (share !== null) otherHalfUnits += 2 * (item.price_cents - share);
+    } else {
       throw new Error("assigned_to must be a member email or 'half'");
     }
   }

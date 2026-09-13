@@ -2,11 +2,14 @@ import { useMemo, useState } from "react";
 import { BackLink } from "../components/BackLink";
 import type { CSSProperties } from "react";
 import type { ApiItem } from "../../shared/types";
-import { divRoundHalfUp, splitItems } from "../../shared/money";
+import { divRoundHalfUp, percentShare, splitItems } from "../../shared/money";
 import { money, moneyAbs, parseDollarsToCents } from "../../shared/format";
 import {
   type ItemState,
+  assignedToCustom,
   assignedToState,
+  centsToPercent,
+  customToAssigned,
   cycleState,
   needsBeatConfirm,
   stateToAssigned,
@@ -19,7 +22,7 @@ import {
   toggleExcluded,
   totalFromExtra,
 } from "../../shared/items";
-import { ARCHIVO, CARD, INK, MONO, MUTED_1, MUTED_2, MUTED_3, MUTED_4, PAPER, SERIF, halfBg, type Colors } from "../theme";
+import { ARCHIVO, CARD, INK, MONO, MUTED_1, MUTED_2, MUTED_3, MUTED_4, PAPER, SERIF, customBg, halfBg, type Colors } from "../theme";
 import { isISODate, todayISO } from "../util";
 
 // The hero: the mockup's confirm screen (sc-if isConfirm), ported
@@ -37,6 +40,13 @@ import { isISODate, todayISO } from "../util";
 // total = subtotal + extra (DEVIATIONS D15). Typing over the total pins
 // it by re-deriving the extra, the inverse; both derivations live in
 // shared/items.ts.
+//
+// A row can also be split by a custom amount: the ÷ button opens an editor
+// under the row where the viewer's share is typed as a percent or as
+// dollars (each field derives the other). That share is held here as the
+// VIEWER's cents, ephemeral like the st codes, and crosses the boundary
+// through customToAssigned / assignedToCustom. It overrides the tap state
+// while set; tapping the label clears it and cycles as usual.
 
 interface ConfirmItem {
   key: string;
@@ -44,6 +54,8 @@ interface ConfirmItem {
   qty: string | null;
   price_cents: number;
   st: ItemState;
+  /** A custom split: the VIEWER's cents of this item. Overrides st. */
+  custom: number | null;
   /** Crossed out: still shown, out of every number. */
   excluded: boolean;
 }
@@ -54,8 +66,9 @@ export interface ConfirmCommit {
   total_cents: number;
   /** Email of whoever paid. */
   payer: string;
-  /** CANONICAL assignment (email or 'half'). */
-  items: { label: string; qty: string | null; price_cents: number; assigned_to: string }[];
+  /** CANONICAL assignment (email or 'half'), plus the anchored member's
+   *  exact cents when the row is custom-split. */
+  items: { label: string; qty: string | null; price_cents: number; assigned_to: string; share_cents: number | null }[];
 }
 
 export interface ConfirmScreenProps {
@@ -106,6 +119,7 @@ export function ConfirmScreen({
       qty: it.qty || null,
       price_cents: it.price_cents ?? 0,
       st: assignedToState(it.assigned_to, viewerEmail, friendEmail),
+      custom: assignedToCustom(it.assigned_to, it.share_cents, it.price_cents ?? 0, viewerEmail, friendEmail),
       excluded: false,
     })),
   );
@@ -132,6 +146,17 @@ export function ConfirmScreen({
   const [editingPrice, setEditingPrice] = useState<{ key: string; text: string } | null>(null);
   const [totalFocused, setTotalFocused] = useState(false);
   const [totalText, setTotalText] = useState("");
+  // The row whose custom-split editor is open, and the raw keystrokes of
+  // whichever of its two fields is mid-edit (the other shows the derived
+  // value).
+  const [splitOpen, setSplitOpen] = useState<string | null>(null);
+  const [splitText, setSplitText] = useState<{ field: "pct" | "amt"; text: string } | null>(null);
+
+  // UI -> canonical, one place for both the live split and the commit.
+  const wireOf = (i: ConfirmItem): { assigned_to: string; share_cents: number | null } =>
+    i.custom !== null
+      ? customToAssigned(i.custom, viewerEmail, friendEmail)
+      : { assigned_to: stateToAssigned(i.st, viewerEmail, friendEmail), share_cents: null };
 
   // Crossed-out rows are still rendered; from here down, only the included
   // ones exist. Nothing crossed out reaches the subtotal, the split, or the
@@ -147,7 +172,7 @@ export function ConfirmScreen({
 
   // ALL live money comes out of splitItems — never local arithmetic.
   const split = splitItems(
-    included.map((i) => ({ price_cents: i.price_cents, assigned_to: stateToAssigned(i.st, viewerEmail, friendEmail) })),
+    included.map((i) => ({ price_cents: i.price_cents, ...wireOf(i) })),
     payerEmail,
     otherEmail,
     totalCents,
@@ -161,11 +186,37 @@ export function ConfirmScreen({
     `${Math.max(0, Math.min(100, divRoundHalfUp(share * 100, Math.max(1, totalCents))))}%`;
 
   const hasItems = included.length > 0;
-  const needsBeat = needsBeatConfirm(included.map((i) => i.st));
+  // A custom-split row breaks the beat the way a half row does: the user
+  // has plainly touched it, so it counts as state 2 for the check.
+  const needsBeat = needsBeatConfirm(included.map((i) => (i.custom !== null ? 2 : i.st)));
   const valid = hasItems && merchant.trim().length > 0 && isISODate(date);
 
   const tapItem = (key: string) => {
-    setItems((prev) => prev.map((i) => (i.key === key ? { ...i, st: cycleState(i.st) } : i)));
+    setItems((prev) => prev.map((i) => (i.key === key ? { ...i, st: cycleState(i.st), custom: null } : i)));
+    if (splitOpen === key) setSplitOpen(null);
+    disarm();
+  };
+
+  // ÷ opens the editor (starting at an even split when the row has no
+  // custom share yet) and closes it again; closing keeps the share.
+  const toggleSplit = (key: string) => {
+    if (splitOpen === key) {
+      setSplitOpen(null);
+      setSplitText(null);
+      return;
+    }
+    setItems((prev) =>
+      prev.map((i) =>
+        i.key === key && i.custom === null ? { ...i, custom: percentShare(i.price_cents, 50) } : i,
+      ),
+    );
+    setSplitOpen(key);
+    setSplitText(null);
+    disarm();
+  };
+
+  const setCustom = (key: string, cents: number) => {
+    setItems((prev) => prev.map((i) => (i.key === key ? { ...i, custom: cents } : i)));
     disarm();
   };
 
@@ -181,6 +232,7 @@ export function ConfirmScreen({
           qty: null,
           price_cents: newPriceCents,
           st: 0,
+          custom: null,
           excluded: false,
         },
       ]),
@@ -197,6 +249,7 @@ export function ConfirmScreen({
   const toggleItem = (key: string) => {
     setItems(toggleExcluded(items, key));
     if (editingPrice?.key === key) setEditingPrice(null);
+    if (splitOpen === key) setSplitOpen(null);
     disarm();
   };
 
@@ -209,7 +262,14 @@ export function ConfirmScreen({
     if (!edit || edit.key !== key) return;
     const cents = parseDollarsToCents(edit.text);
     if (cents === null) return;
-    setItems((prev) => prev.map((i) => (i.key === key ? { ...i, price_cents: cents } : i)));
+    // A custom share can never exceed what the row now costs.
+    setItems((prev) =>
+      prev.map((i) =>
+        i.key === key
+          ? { ...i, price_cents: cents, custom: i.custom === null ? null : Math.min(i.custom, cents) }
+          : i,
+      ),
+    );
     disarm();
   };
 
@@ -253,7 +313,7 @@ export function ConfirmScreen({
         label: i.label,
         qty: i.qty,
         price_cents: i.price_cents,
-        assigned_to: stateToAssigned(i.st, viewerEmail, friendEmail),
+        ...wireOf(i),
       })),
     });
   };
@@ -406,18 +466,21 @@ export function ConfirmScreen({
               greyed and struck through, and stops responding to everything
               but Undo. */}
           {items.map((i) => (
-            <div key={i.key} className="receipt-row" style={{ display: "flex", alignItems: "stretch" }}>
+            <div key={i.key} className="receipt-row" style={{ display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "stretch" }}>
               <span
                 style={{
                   width: 10,
                   flex: "none",
                   background: i.excluded
                     ? "rgba(0,0,0,.10)"
-                    : i.st === 0
-                      ? C.fr
-                      : i.st === 1
-                        ? C.me
-                        : halfBg(C),
+                    : i.custom !== null
+                      ? customBg(C, centsToPercent(i.custom, i.price_cents))
+                      : i.st === 0
+                        ? C.fr
+                        : i.st === 1
+                          ? C.me
+                          : halfBg(C),
                 }}
               />
               <div
@@ -431,11 +494,13 @@ export function ConfirmScreen({
                   borderBottom: "1px solid rgba(0,0,0,.07)",
                   background: i.excluded
                     ? "rgba(0,0,0,.02)"
-                    : i.st === 0
-                      ? "rgba(44,40,35,.05)"
-                      : i.st === 1
-                        ? `${C.me}1f`
-                        : `${C.me}0d`,
+                    : i.custom !== null
+                      ? `${C.me}0d`
+                      : i.st === 0
+                        ? "rgba(44,40,35,.05)"
+                        : i.st === 1
+                          ? `${C.me}1f`
+                          : `${C.me}0d`,
                 }}
               >
                 <button
@@ -469,16 +534,18 @@ export function ConfirmScreen({
                       display: "block",
                       marginTop: 3,
                       font: `500 11.5px ${MONO}`,
-                      color: i.excluded ? MUTED_4 : i.st === 0 ? C.fr : i.st === 1 ? C.me : MUTED_2,
+                      color: i.excluded ? MUTED_4 : i.custom !== null ? MUTED_2 : i.st === 0 ? C.fr : i.st === 1 ? C.me : MUTED_2,
                     }}
                   >
                     {i.excluded
                       ? "Not on this split"
-                      : i.st === 0
-                        ? `${F}'s`
-                        : i.st === 1
-                          ? "Yours"
-                          : `${moneyAbs(divRoundHalfUp(i.price_cents, 2))} each`}
+                      : i.custom !== null
+                        ? `You ${moneyAbs(i.custom)} · ${F} ${moneyAbs(i.price_cents - i.custom)}`
+                        : i.st === 0
+                          ? `${F}'s`
+                          : i.st === 1
+                            ? "Yours"
+                            : `${moneyAbs(divRoundHalfUp(i.price_cents, 2))} each`}
                   </span>
                 </button>
                 <span
@@ -526,6 +593,28 @@ export function ConfirmScreen({
                   }}
                 />
                 <button
+                  onClick={() => toggleSplit(i.key)}
+                  disabled={i.excluded}
+                  aria-label={`Split ${i.label} by amount`}
+                  aria-pressed={splitOpen === i.key}
+                  title="Split by a custom amount"
+                  style={{
+                    flex: "none",
+                    width: 30,
+                    height: 30,
+                    marginLeft: 4,
+                    alignSelf: "center",
+                    border: 0,
+                    borderRadius: 8,
+                    background: splitOpen === i.key ? `${C.me}1f` : "transparent",
+                    font: `500 16px/1 ${ARCHIVO}`,
+                    color: i.excluded ? MUTED_4 : i.custom !== null ? C.me : MUTED_3,
+                    cursor: i.excluded ? "default" : "pointer",
+                  }}
+                >
+                  ÷
+                </button>
+                <button
                   onClick={() => toggleItem(i.key)}
                   aria-label={i.excluded ? `Put ${i.label} back` : `Cross out ${i.label}`}
                   title={i.excluded ? `Put ${i.label} back` : `Cross out ${i.label}`}
@@ -549,6 +638,103 @@ export function ConfirmScreen({
                   {i.excluded ? "↺" : "✕"}
                 </button>
               </div>
+            </div>
+            {splitOpen === i.key && !i.excluded && i.custom !== null && (
+              <div
+                style={{
+                  padding: "10px 14px 12px 24px",
+                  borderBottom: "1px solid rgba(0,0,0,.07)",
+                  background: `${C.me}0d`,
+                  display: "flex",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  gap: "6px 10px",
+                }}
+              >
+                <span style={{ ...capsLabel, flex: "none", marginRight: 2 }}>Your share</span>
+                <span style={{ display: "inline-flex", alignItems: "baseline", gap: 3 }}>
+                  <input
+                    value={splitText?.field === "pct" ? splitText.text : String(centsToPercent(i.custom, i.price_cents))}
+                    inputMode="numeric"
+                    aria-label={`Your percent of ${i.label}`}
+                    onFocus={(e) => {
+                      setSplitText({ field: "pct", text: String(centsToPercent(i.custom ?? 0, i.price_cents)) });
+                      e.target.select();
+                    }}
+                    onChange={(e) => {
+                      const text = e.target.value.replace(/[^0-9]/g, "").slice(0, 3);
+                      setSplitText({ field: "pct", text });
+                      const pct = text === "" ? null : parseInt(text, 10);
+                      if (pct !== null && pct >= 0 && pct <= 100) setCustom(i.key, percentShare(i.price_cents, pct));
+                    }}
+                    onBlur={() => setSplitText(null)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur();
+                    }}
+                    style={{
+                      width: 40,
+                      border: 0,
+                      borderBottom: "1px dashed rgba(0,0,0,.28)",
+                      background: "transparent",
+                      padding: "0 0 2px",
+                      font: `500 15px ${MONO}`,
+                      fontVariantNumeric: "tabular-nums",
+                      textAlign: "right",
+                    }}
+                  />
+                  <span style={{ font: `500 13px ${MONO}`, color: MUTED_2 }}>%</span>
+                </span>
+                <span style={{ font: `500 13px ${MONO}`, color: MUTED_3 }}>or</span>
+                <input
+                  value={splitText?.field === "amt" ? splitText.text : moneyAbs(i.custom)}
+                  inputMode="decimal"
+                  aria-label={`Your dollars of ${i.label}`}
+                  onFocus={(e) => {
+                    setSplitText({ field: "amt", text: moneyAbs(i.custom ?? 0) });
+                    e.target.select();
+                  }}
+                  onChange={(e) => {
+                    const text = e.target.value;
+                    setSplitText({ field: "amt", text });
+                    const cents = parseDollarsToCents(text);
+                    if (cents !== null && cents <= i.price_cents) setCustom(i.key, cents);
+                  }}
+                  onBlur={() => setSplitText(null)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
+                  style={{
+                    width: 68,
+                    border: 0,
+                    borderBottom: "1px dashed rgba(0,0,0,.28)",
+                    background: "transparent",
+                    padding: "0 0 2px",
+                    font: `500 15px ${MONO}`,
+                    fontVariantNumeric: "tabular-nums",
+                    textAlign: "right",
+                  }}
+                />
+                <span style={{ flex: 1, minWidth: 90, font: `500 12px ${MONO}`, color: C.fr }}>
+                  {F} {moneyAbs(i.price_cents - i.custom)}
+                </span>
+                <button
+                  onClick={() => toggleSplit(i.key)}
+                  style={{
+                    flex: "none",
+                    height: 32,
+                    padding: "0 12px",
+                    borderRadius: 10,
+                    border: 0,
+                    cursor: "pointer",
+                    font: `600 13px ${ARCHIVO}`,
+                    background: C.me,
+                    color: "#fff",
+                  }}
+                >
+                  Done
+                </button>
+              </div>
+            )}
             </div>
           ))}
 

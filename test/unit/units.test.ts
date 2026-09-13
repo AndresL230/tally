@@ -178,17 +178,22 @@ describe("splitPriceCents — unit prices sum back to the line EXACTLY", () => {
 // ---------------------------------------------------------------------------
 
 function item(over: Partial<ApiItem> & { id: string }): ApiItem {
-  return { label: "Item", qty: null, price_cents: 100, assigned_to: null, ...over };
+  return { label: "Item", qty: null, price_cents: 100, assigned_to: null, share_cents: null, ...over };
 }
 
 describe("expandQtyItems — one row per unit, everything else untouched", () => {
   it("the headline case: 'Boba Tea ×3' at 1500 becomes three 500-cent rows with stable ids and NO qty suffix", () => {
     const src = item({ id: "a", label: "Boba Tea", qty: "×3", price_cents: 1500 });
     expect(expandQtyItems([src])).toEqual([
-      { id: "a#1", label: "Boba Tea", qty: null, price_cents: 500, assigned_to: null },
-      { id: "a#2", label: "Boba Tea", qty: null, price_cents: 500, assigned_to: null },
-      { id: "a#3", label: "Boba Tea", qty: null, price_cents: 500, assigned_to: null },
+      { id: "a#1", label: "Boba Tea", qty: null, price_cents: 500, assigned_to: null, share_cents: null },
+      { id: "a#2", label: "Boba Tea", qty: null, price_cents: 500, assigned_to: null, share_cents: null },
+      { id: "a#3", label: "Boba Tea", qty: null, price_cents: 500, assigned_to: null, share_cents: null },
     ]);
+  });
+
+  it("a line with a custom share_cents passes through: units cannot carry a cut of the line", () => {
+    const src = item({ id: "a", qty: "×3", price_cents: 1500, assigned_to: "x@example.com", share_cents: 400 });
+    expect(expandQtyItems([src])).toEqual([src]);
   });
 
   it("remainder cents ride the first units and the line total survives: 1000 ×3 -> 334/333/333", () => {
@@ -282,6 +287,7 @@ describe("expandQtyItems — one row per unit, everything else untouched", () =>
       qty: arbQty,
       price_cents: fc.integer({ min: 0, max: 100_000 }),
       assigned_to: fc.constantFrom<string | null>(null, "half"),
+      share_cents: fc.constant(null),
     });
     fc.assert(
       fc.property(fc.array(arbItem, { maxLength: 60 }), (src) => {

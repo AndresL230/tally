@@ -19,6 +19,8 @@ export interface PostExpenseItem {
   qty?: string | null;
   price_cents: number;
   assigned_to: string;
+  /** Custom split: the member in assigned_to pays exactly this many cents. */
+  share_cents?: number | null;
 }
 
 interface PostExpenseBase {

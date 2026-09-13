@@ -46,3 +46,9 @@ export function colorsFor(accent: string | null | undefined): Colors {
 export function halfBg(c: Colors): string {
   return `linear-gradient(180deg, ${c.me} 0 50%, ${c.fr} 50% 100%)`;
 }
+
+/** The same two tones cut at the viewer's percent, for a custom split. */
+export function customBg(c: Colors, viewerPct: number): string {
+  const p = Math.max(0, Math.min(100, viewerPct));
+  return `linear-gradient(180deg, ${c.me} 0 ${p}%, ${c.fr} ${p}% 100%)`;
+}

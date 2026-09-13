@@ -254,3 +254,35 @@ Two consequences worth knowing:
 Any valid date is allowed, including a future one — the same latitude the
 confirm screen already gives, since a receipt dated wrong by the scanner is
 more common than a member deliberately post-dating an entry.
+
+## D17. An item can be split by a custom amount, not only whole/half
+
+The mockup's item toggle has three stops: the other person's, yours, half.
+Real receipts have a fourth case — the bottle two people drank unevenly,
+the appetizer one of you mostly ate — and forcing it into "half" quietly
+misstates the ledger. `receipt_items.share_cents` (migration 0004,
+nullable) is the fourth case: the member named in `assigned_to` pays
+exactly that many cents of the item and the other member pays the rest.
+NULL keeps the old meaning, so every row and every code path that predates
+it is untouched; the server refuses it on a `'half'` item and outside
+`0..price_cents`. A percent is an INPUT convenience only — the confirm
+screen resolves it to cents (`percentShare`, halves up) before anything is
+posted — so nothing stores "30%"; the detail screen shows the cents and
+draws the spine cut at the rounded percent.
+
+Design choices worth knowing:
+
+- **The tap cycle is untouched.** A fourth stop that opened an editor would
+  break the zero-thought tapping the confirm screen is built around, so the
+  custom split lives behind a separate ÷ control on the row. It overrides
+  the tap state while set; tapping the label clears it and cycles as usual.
+- **Exact cents, no new rounding.** Custom cents join the existing
+  half-cent accumulator as whole cents, so D1's single-rounding rule still
+  holds and the payer's side is still derived by subtraction. The extra
+  (tax and tip) keeps splitting in proportion to each side's item subtotal.
+- **The wire is anchored, not viewer-relative (rule D).** The client always
+  posts the viewer's email with the viewer's cents; either anchor reads
+  back correctly for either member (`assignedToCustom`).
+- **A quantity line with a custom share is not expanded into units.** A cut
+  of the whole line cannot be spread over its units without inventing a
+  rounding rule, so `expandQtyItems` passes it through unchanged.

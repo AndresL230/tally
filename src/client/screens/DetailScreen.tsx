@@ -5,8 +5,9 @@ import type { ApiEntry, LedgerDetail } from "../../shared/types";
 import { otherMember, viewerDelta } from "../../shared/ledger";
 import { chainDepth, chainTip, isVoided as chainVoided, voidChain } from "../../shared/voids";
 import { divRoundHalfUp, splitItems, type SplitResult } from "../../shared/money";
+import { assignedToCustom, centsToPercent } from "../../shared/assign";
 import { longDate, money, moneyAbs, moneySigned } from "../../shared/format";
-import { ARCHIVO, CARD, INK, MONO, MUTED_1, MUTED_2, MUTED_3, SERIF, halfBg, type Colors } from "../theme";
+import { ARCHIVO, CARD, INK, MONO, MUTED_1, MUTED_2, MUTED_3, SERIF, customBg, halfBg, type Colors } from "../theme";
 import { isISODate, isoDay } from "../util";
 
 // Port of the mockup's entry detail (sc-if isDetail): delta hero in the
@@ -105,7 +106,11 @@ export function DetailScreen({
     const otherEmail = payerEmail === viewer ? friendEmail : viewer;
     try {
       sp = splitItems(
-        items.map((i) => ({ price_cents: i.price_cents ?? 0, assigned_to: i.assigned_to ?? otherEmail })),
+        items.map((i) => ({
+          price_cents: i.price_cents ?? 0,
+          assigned_to: i.assigned_to ?? otherEmail,
+          share_cents: i.share_cents,
+        })),
         payerEmail,
         otherEmail,
         ex.total_cents,
@@ -130,17 +135,39 @@ export function DetailScreen({
   };
 
   const itemRow = (i: (typeof items)[number], idx: number) => {
-    const kind = i.assigned_to === "half" ? "half" : i.assigned_to === viewer ? "mine" : "theirs";
     const price = i.price_cents ?? 0;
+    // A custom split reads as the viewer's cents; malformed data falls back
+    // to the plain assignment rather than hiding the row.
+    let custom: number | null = null;
+    try {
+      custom = assignedToCustom(i.assigned_to, i.share_cents, price, viewer, friendEmail);
+    } catch {
+      custom = null;
+    }
+    const kind =
+      custom !== null ? "custom" : i.assigned_to === "half" ? "half" : i.assigned_to === viewer ? "mine" : "theirs";
     const noteText =
-      kind === "theirs" ? `${F}'s` : kind === "mine" ? "Yours" : `${moneyAbs(divRoundHalfUp(price, 2))} each`;
+      kind === "custom"
+        ? `You ${moneyAbs(custom ?? 0)} · ${F} ${moneyAbs(price - (custom ?? 0))}`
+        : kind === "theirs"
+          ? `${F}'s`
+          : kind === "mine"
+            ? "Yours"
+            : `${moneyAbs(divRoundHalfUp(price, 2))} each`;
     return (
       <div key={i.id || idx} style={{ display: "flex", alignItems: "stretch" }}>
         <span
           style={{
             width: 10,
             flex: "none",
-            background: kind === "theirs" ? C.fr : kind === "mine" ? C.me : halfBg(C),
+            background:
+              kind === "custom"
+                ? customBg(C, centsToPercent(custom ?? 0, price))
+                : kind === "theirs"
+                  ? C.fr
+                  : kind === "mine"
+                    ? C.me
+                    : halfBg(C),
           }}
         />
         <span

@@ -45,7 +45,7 @@ function toApi(r: ReceiptRow): ApiReceipt {
 async function itemsOf(db: D1Database, receiptId: string): Promise<ApiItem[]> {
   const { results } = await db
     .prepare(
-      "SELECT id, label, qty, price_cents, assigned_to FROM receipt_items WHERE receipt_id = ?1 ORDER BY rowid",
+      "SELECT id, label, qty, price_cents, assigned_to, share_cents FROM receipt_items WHERE receipt_id = ?1 ORDER BY rowid",
     )
     .bind(receiptId)
     .all<ApiItem>();

@@ -94,8 +94,9 @@ export function registerMutations(app: Hono<AppContext>): void {
     let otherShare: number;
     let extraCents: number | null = null;
     let receiptId: string | null = null;
-    let itemRows: { label: string; qty: string | null; price_cents: number; assigned_to: string }[] | null =
-      null;
+    let itemRows:
+      | { label: string; qty: string | null; price_cents: number; assigned_to: string; share_cents: number | null }[]
+      | null = null;
 
     if (method === "items") {
       receiptId = assertId(body.receipt_id, "receipt_id");
@@ -121,12 +122,25 @@ export function registerMutations(app: Hono<AppContext>): void {
             `items[${i}].assigned_to must be a member email or 'half'`,
           );
         }
-        return { label, qty, price_cents: price, assigned_to: assigned };
+        // A custom split: assigned's exact cents of the item. Only on an
+        // item anchored to a member, and never more than the item costs.
+        let share: number | null = null;
+        if (it.share_cents !== undefined && it.share_cents !== null) {
+          if (assigned === "half") {
+            throw new ValidationError(`items[${i}].share_cents cannot be set on a 'half' item`);
+          }
+          share = assertInt(it.share_cents, `items[${i}].share_cents`, { min: 0, max: price });
+        }
+        return { label, qty, price_cents: price, assigned_to: assigned, share_cents: share };
       });
       // The server is the authority on the split; any client-sent
       // other_share_cents/extra_cents is ignored (penny rule 3).
       const split = splitItems(
-        itemRows.map((it) => ({ price_cents: it.price_cents, assigned_to: it.assigned_to })),
+        itemRows.map((it) => ({
+          price_cents: it.price_cents,
+          assigned_to: it.assigned_to,
+          share_cents: it.share_cents,
+        })),
         payer,
         other,
         totalCents,
@@ -202,9 +216,9 @@ export function registerMutations(app: Hono<AppContext>): void {
         ).bind(id, receiptId),
         ...itemRows.map((it) =>
           c.env.DB.prepare(
-            `INSERT INTO receipt_items (id, receipt_id, label, qty, price_cents, assigned_to)
-             SELECT ?3, ?2, ?4, ?5, ?6, ?7 WHERE EXISTS (${OURS})`,
-          ).bind(id, receiptId, crypto.randomUUID(), it.label, it.qty, it.price_cents, it.assigned_to),
+            `INSERT INTO receipt_items (id, receipt_id, label, qty, price_cents, assigned_to, share_cents)
+             SELECT ?3, ?2, ?4, ?5, ?6, ?7, ?8 WHERE EXISTS (${OURS})`,
+          ).bind(id, receiptId, crypto.randomUUID(), it.label, it.qty, it.price_cents, it.assigned_to, it.share_cents),
         ),
         c.env.DB.prepare(
           `UPDATE receipts SET status = 'posted', merchant = ?3, purchased_on = ?4, total_cents = ?5
@@ -450,16 +464,17 @@ export function registerMutations(app: Hono<AppContext>): void {
     let otherShare = expense.total_cents - expense.other_share_cents;
     if (expense.method === "items" && expense.receipt_id) {
       const { results } = await c.env.DB.prepare(
-        "SELECT price_cents, assigned_to FROM receipt_items WHERE receipt_id = ?1",
+        "SELECT price_cents, assigned_to, share_cents FROM receipt_items WHERE receipt_id = ?1",
       )
         .bind(expense.receipt_id)
-        .all<{ price_cents: number | null; assigned_to: string | null }>();
+        .all<{ price_cents: number | null; assigned_to: string | null; share_cents: number | null }>();
       if (results.length) {
         try {
           otherShare = splitItems(
             results.map((r) => ({
               price_cents: r.price_cents ?? 0,
               assigned_to: r.assigned_to ?? other,
+              share_cents: r.share_cents,
             })),
             payer,
             other,

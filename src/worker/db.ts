@@ -118,7 +118,7 @@ export async function ledgerDetail(
       .all<SettlementRow>(),
     db
       .prepare(
-        `SELECT ri.id, ri.receipt_id, ri.label, ri.qty, ri.price_cents, ri.assigned_to
+        `SELECT ri.id, ri.receipt_id, ri.label, ri.qty, ri.price_cents, ri.assigned_to, ri.share_cents
          FROM receipt_items ri
          WHERE ri.receipt_id IN (SELECT e.receipt_id FROM expenses e WHERE e.ledger_id = ?1 AND e.receipt_id IS NOT NULL)
          ORDER BY ri.rowid`,

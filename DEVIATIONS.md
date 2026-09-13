@@ -272,18 +272,24 @@ draws the spine cut at the rounded percent.
 
 Design choices worth knowing:
 
-- **The split is the fourth stop of the tap cycle**: other's, yours, half,
-  split, other's, opening at an even split. A per-row ÷ button on EVERY
-  row was tried first and dropped: a 30px ÷ next to the 30px ✕ was a
-  mis-tap waiting to happen on a phone, and it cluttered every row for a
-  case most rows never need. Only a split row shows the ÷ (a 38px round
-  button), and only tapping it unfolds the split card beneath the row —
-  entering the state never opens the card on its own. The card is the
-  percent screen's grammar (`ItemSplitControl`): friend's amount left,
-  yours right, one slider in steps of five with the percentages under it,
-  and 25/50/75 quick buttons; a thumb-sized control rather than two tiny
-  text fields. It unfolds with a short animation, off under
-  `prefers-reduced-motion`.
+- **The tap cycle keeps three stops: other's, yours, split.** The mockup's
+  third stop was "half"; here the third stop IS the split, and it starts
+  at half each, so the common case costs the same two taps it always did.
+  On the wire an exactly-even split is still the canonical `'half'` (its
+  half-cent-unit rounding is untouched, and rows posted before this
+  change load back into the same state); only an uneven share goes out
+  as `share_cents`. A fourth "custom" stop and, before that, a ÷ button
+  on every row were both tried and dropped: the extra stop made the
+  round trip back to "other's" four taps, and a 30px ÷ beside the 30px
+  ✕ was a mis-tap waiting to happen on a phone. Only a split row shows
+  the ÷ (a 36px round button, sized to the row so it never changes the
+  row's height), and only tapping it unfolds the split card beneath the
+  row — entering the state never opens the card on its own. The card is
+  the percent screen's grammar (`ItemSplitControl`): friend's amount
+  left, yours right, one slider in steps of five with the percentages
+  under it, and 25/50/75 quick buttons; a thumb-sized control rather
+  than two tiny text fields. It unfolds with a short animation, off
+  under `prefers-reduced-motion`.
 - **Exact cents, no new rounding.** Custom cents join the existing
   half-cent accumulator as whole cents, so D1's single-rounding rule still
   holds and the payer's side is still derived by subtraction. The extra

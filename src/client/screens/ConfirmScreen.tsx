@@ -42,13 +42,15 @@ import { isISODate, todayISO } from "../util";
 // it by re-deriving the extra, the inverse; both derivations live in
 // shared/items.ts.
 //
-// A row can also be split by a custom amount. It is the FOURTH stop of the
-// tap cycle — other's, yours, half, split, other's — and opens at an even
-// split. Only a split row shows the ÷ button; tapping it unfolds the split
-// card (ItemSplitControl, the percent screen's slider) beneath the row,
-// and tapping it again folds the card away, keeping the share. That share
-// is held here as the VIEWER's cents, ephemeral like the st codes, and
-// crosses the boundary through customToAssigned / assignedToCustom.
+// The third stop of the tap cycle is SPLIT, and it starts at half each:
+// other's, yours, split, other's. Only a split row shows the ÷ button;
+// tapping it unfolds the split card (ItemSplitControl, the percent
+// screen's slider) beneath the row, and tapping it again folds the card
+// away, keeping the share. The share is held here as the VIEWER's cents,
+// ephemeral like the st codes. On the wire an exactly-even split is still
+// the canonical 'half' (so its half-cent rounding is untouched) and any
+// other share goes out through customToAssigned; assignedToCustom brings
+// either back.
 
 interface ConfirmItem {
   key: string;
@@ -56,7 +58,7 @@ interface ConfirmItem {
   qty: string | null;
   price_cents: number;
   st: ItemState;
-  /** A custom split: the VIEWER's cents of this item. Overrides st. */
+  /** When st === 2 (split): the VIEWER's cents of this item. */
   custom: number | null;
   /** Crossed out: still shown, out of every number. */
   excluded: boolean;
@@ -114,14 +116,25 @@ export function ConfirmScreen({
   // — visibly, while the user can still see and undo it. The posted items
   // are then already unit rows, so the server's split math is untouched.
   // Unit prices sum back to the line exactly (shared/units.ts).
+  // Canonical -> UI when loading: 'half' and a share_cents row both land in
+  // the split state, the former at half each.
+  const loadState = (
+    assigned: string | null,
+    shareCents: number | null,
+    priceCents: number,
+  ): { st: ItemState; custom: number | null } => {
+    const custom = assignedToCustom(assigned, shareCents, priceCents, viewerEmail, friendEmail);
+    if (custom !== null) return { st: 2, custom };
+    const st = assignedToState(assigned, viewerEmail, friendEmail);
+    return { st, custom: st === 2 ? percentShare(priceCents, 50) : null };
+  };
   const [items, setItems] = useState<ConfirmItem[]>(() =>
     expandQtyItems(initialItems).map((it) => ({
       key: it.id,
       label: it.label ?? "Item",
       qty: it.qty || null,
       price_cents: it.price_cents ?? 0,
-      st: assignedToState(it.assigned_to, viewerEmail, friendEmail),
-      custom: assignedToCustom(it.assigned_to, it.share_cents, it.price_cents ?? 0, viewerEmail, friendEmail),
+      ...loadState(it.assigned_to, it.share_cents, it.price_cents ?? 0),
       excluded: false,
     })),
   );
@@ -150,9 +163,15 @@ export function ConfirmScreen({
   const [totalText, setTotalText] = useState("");
   // The split row whose card is unfolded, if any. Only a ÷ tap opens it.
   const [splitOpen, setSplitOpen] = useState<string | null>(null);
-  // UI -> canonical, one place for both the live split and the commit.
+  // An even split is what the split state starts at, and what 'half' means.
+  const halfOf = (priceCents: number) => percentShare(priceCents, 50);
+  const isHalf = (i: ConfirmItem) => i.st === 2 && i.custom === halfOf(i.price_cents);
+
+  // UI -> canonical, one place for both the live split and the commit. An
+  // even split stays the canonical 'half'; any other share is anchored on
+  // the viewer with share_cents.
   const wireOf = (i: ConfirmItem): { assigned_to: string; share_cents: number | null } =>
-    i.custom !== null
+    i.st === 2 && i.custom !== null && !isHalf(i)
       ? customToAssigned(i.custom, viewerEmail, friendEmail)
       : { assigned_to: stateToAssigned(i.st, viewerEmail, friendEmail), share_cents: null };
 
@@ -184,20 +203,17 @@ export function ConfirmScreen({
     `${Math.max(0, Math.min(100, divRoundHalfUp(share * 100, Math.max(1, totalCents))))}%`;
 
   const hasItems = included.length > 0;
-  // A custom-split row breaks the beat the way a half row does: the user
-  // has plainly touched it, so it counts as state 2 for the check.
-  const needsBeat = needsBeatConfirm(included.map((i) => (i.custom !== null ? 2 : i.st)));
+  const needsBeat = needsBeatConfirm(included.map((i) => i.st));
   const valid = hasItems && merchant.trim().length > 0 && isISODate(date);
 
-  // One tap: other's -> yours -> half -> split -> other's. The split stop
-  // starts at an even split; its card stays folded until ÷ is tapped.
+  // One tap: other's -> yours -> split -> other's. The split stop starts at
+  // half each; its card stays folded until ÷ is tapped.
   const tapItem = (key: string) => {
     setItems((prev) =>
       prev.map((i) => {
         if (i.key !== key) return i;
-        if (i.custom !== null) return { ...i, st: 0, custom: null };
-        if (i.st === 2) return { ...i, custom: percentShare(i.price_cents, 50) };
-        return { ...i, st: cycleState(i.st) };
+        const st = cycleState(i.st);
+        return { ...i, st, custom: st === 2 ? halfOf(i.price_cents) : null };
       }),
     );
     if (splitOpen === key) setSplitOpen(null);
@@ -260,7 +276,13 @@ export function ConfirmScreen({
     setItems((prev) =>
       prev.map((i) =>
         i.key === key
-          ? { ...i, price_cents: cents, custom: i.custom === null ? null : Math.min(i.custom, cents) }
+          ? {
+              ...i,
+              price_cents: cents,
+              // An even split follows the new price; any other share is
+              // kept, capped at what the row now costs.
+              custom: i.custom === null ? null : isHalf(i) ? halfOf(cents) : Math.min(i.custom, cents),
+            }
           : i,
       ),
     );
@@ -468,12 +490,12 @@ export function ConfirmScreen({
                   flex: "none",
                   background: i.excluded
                     ? "rgba(0,0,0,.10)"
-                    : i.custom !== null
-                      ? customBg(C, centsToPercent(i.custom, i.price_cents))
-                      : i.st === 0
-                        ? C.fr
-                        : i.st === 1
-                          ? C.me
+                    : i.st === 0
+                      ? C.fr
+                      : i.st === 1
+                        ? C.me
+                        : i.custom !== null && !isHalf(i)
+                          ? customBg(C, centsToPercent(i.custom, i.price_cents))
                           : halfBg(C),
                 }}
               />
@@ -488,13 +510,11 @@ export function ConfirmScreen({
                   borderBottom: "1px solid rgba(0,0,0,.07)",
                   background: i.excluded
                     ? "rgba(0,0,0,.02)"
-                    : i.custom !== null
-                      ? `${C.me}0d`
-                      : i.st === 0
-                        ? "rgba(44,40,35,.05)"
-                        : i.st === 1
-                          ? `${C.me}1f`
-                          : `${C.me}0d`,
+                    : i.st === 0
+                      ? "rgba(44,40,35,.05)"
+                      : i.st === 1
+                        ? `${C.me}1f`
+                        : `${C.me}0d`,
                 }}
               >
                 <button
@@ -528,36 +548,40 @@ export function ConfirmScreen({
                       display: "block",
                       marginTop: 3,
                       font: `500 11.5px ${MONO}`,
-                      color: i.excluded ? MUTED_4 : i.custom !== null ? MUTED_2 : i.st === 0 ? C.fr : i.st === 1 ? C.me : MUTED_2,
+                      color: i.excluded ? MUTED_4 : i.st === 0 ? C.fr : i.st === 1 ? C.me : MUTED_2,
                     }}
                   >
                     {i.excluded
                       ? "Not on this split"
-                      : i.custom !== null
-                        ? `${centsToPercent(i.custom, i.price_cents)}% yours · ${moneyAbs(i.custom)}`
-                        : i.st === 0
-                          ? `${F}'s`
-                          : i.st === 1
-                            ? "Yours"
+                      : i.st === 0
+                        ? `${F}'s`
+                        : i.st === 1
+                          ? "Yours"
+                          : i.custom !== null && !isHalf(i)
+                            ? `${centsToPercent(i.custom, i.price_cents)}% yours · ${moneyAbs(i.custom)}`
                             : `${moneyAbs(divRoundHalfUp(i.price_cents, 2))} each`}
                   </span>
                 </button>
-                {i.custom !== null && !i.excluded && (
+                {i.st === 2 && i.custom !== null && !i.excluded && (
                   <button
                     onClick={() => toggleSplitCard(i.key)}
                     aria-label={`${splitOpen === i.key ? "Hide" : "Adjust"} the split of ${i.label}`}
                     aria-expanded={splitOpen === i.key}
                     style={{
+                      // 34px sits inside the row's 35px content box (62
+                      // min-height less 13px padding each side and the 1px
+                      // bottom border), so the button never changes the
+                      // row's height.
                       flex: "none",
-                      width: 38,
-                      height: 38,
+                      width: 34,
+                      height: 34,
                       marginLeft: 6,
                       alignSelf: "center",
                       border: 0,
-                      borderRadius: 19,
+                      borderRadius: 17,
                       background: splitOpen === i.key ? C.me : `${C.me}1f`,
                       color: splitOpen === i.key ? "#fff" : C.me,
-                      font: `600 19px/1 ${ARCHIVO}`,
+                      font: `600 18px/1 ${ARCHIVO}`,
                       cursor: "pointer",
                       transition: "background .18s ease, color .18s ease",
                     }}
@@ -634,7 +658,7 @@ export function ConfirmScreen({
                 </button>
               </div>
             </div>
-            {!i.excluded && i.custom !== null && splitOpen === i.key && (
+            {!i.excluded && i.st === 2 && i.custom !== null && splitOpen === i.key && (
               <ItemSplitControl
                 colors={C}
                 friendName={F}
@@ -803,9 +827,9 @@ export function ConfirmScreen({
         </div>
         <div style={{ marginTop: 14, font: `400 12.5px ${MONO}`, color: MUTED_4, lineHeight: 1.65 }}>
           How assigning works: every item starts as {F}'s. Tap it once to make
-          it yours, twice to split it half-and-half (you each cover half its
-          price), a third time for a custom split (a slider sets your share),
-          and a fourth time to hand it back to {F}. The colored edge
+          it yours, twice to split it (half each to start; the ÷ button lets
+          you set the shares), and a third time to hand it back to {F}. The
+          colored edge
           shows whose it is; tax and tip divide themselves in proportion to
           what each of you took.
           <br />

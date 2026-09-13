@@ -272,10 +272,13 @@ draws the spine cut at the rounded percent.
 
 Design choices worth knowing:
 
-- **The tap cycle is untouched.** A fourth stop that opened an editor would
-  break the zero-thought tapping the confirm screen is built around, so the
-  custom split lives behind a separate ÷ control on the row. It overrides
-  the tap state while set; tapping the label clears it and cycles as usual.
+- **The split is the fourth stop of the tap cycle**: other's, yours, half,
+  split, other's. A separate per-row control was tried first and dropped:
+  a 30px ÷ next to the 30px ✕ was a mis-tap waiting to happen on a phone,
+  and it cluttered every row for a case most rows never need. A split row
+  shows a ÷ mark in its sub-label and, beneath it, the same slider as the
+  percent screen (friend on the left, steps of five, percentages shown),
+  which is a thumb-sized control rather than two tiny text fields.
 - **Exact cents, no new rounding.** Custom cents join the existing
   half-cent accumulator as whole cents, so D1's single-rounding rule still
   holds and the payer's side is still derived by subtraction. The extra

@@ -148,7 +148,7 @@ export function DetailScreen({
       custom !== null ? "custom" : i.assigned_to === "half" ? "half" : i.assigned_to === viewer ? "mine" : "theirs";
     const noteText =
       kind === "custom"
-        ? `You ${moneyAbs(custom ?? 0)} · ${F} ${moneyAbs(price - (custom ?? 0))}`
+        ? `÷ ${centsToPercent(custom ?? 0, price)}% yours · ${moneyAbs(custom ?? 0)}`
         : kind === "theirs"
           ? `${F}'s`
           : kind === "mine"

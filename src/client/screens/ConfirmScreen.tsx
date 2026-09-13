@@ -41,12 +41,12 @@ import { isISODate, todayISO } from "../util";
 // it by re-deriving the extra, the inverse; both derivations live in
 // shared/items.ts.
 //
-// A row can also be split by a custom amount: the ÷ button opens an editor
-// under the row where the viewer's share is typed as a percent or as
-// dollars (each field derives the other). That share is held here as the
-// VIEWER's cents, ephemeral like the st codes, and crosses the boundary
-// through customToAssigned / assignedToCustom. It overrides the tap state
-// while set; tapping the label clears it and cycles as usual.
+// A row can also be split by a custom amount. It is the FOURTH stop of the
+// tap cycle — other's, yours, half, split, other's — so there is no extra
+// control on the row: a split row shows a ÷ mark and a slider beneath it
+// (the same slider as the percent screen, friend on the left). That share
+// is held here as the VIEWER's cents, ephemeral like the st codes, and
+// crosses the boundary through customToAssigned / assignedToCustom.
 
 interface ConfirmItem {
   key: string;
@@ -146,12 +146,6 @@ export function ConfirmScreen({
   const [editingPrice, setEditingPrice] = useState<{ key: string; text: string } | null>(null);
   const [totalFocused, setTotalFocused] = useState(false);
   const [totalText, setTotalText] = useState("");
-  // The row whose custom-split editor is open, and the raw keystrokes of
-  // whichever of its two fields is mid-edit (the other shows the derived
-  // value).
-  const [splitOpen, setSplitOpen] = useState<string | null>(null);
-  const [splitText, setSplitText] = useState<{ field: "pct" | "amt"; text: string } | null>(null);
-
   // UI -> canonical, one place for both the live split and the commit.
   const wireOf = (i: ConfirmItem): { assigned_to: string; share_cents: number | null } =>
     i.custom !== null
@@ -191,27 +185,17 @@ export function ConfirmScreen({
   const needsBeat = needsBeatConfirm(included.map((i) => (i.custom !== null ? 2 : i.st)));
   const valid = hasItems && merchant.trim().length > 0 && isISODate(date);
 
+  // One tap: other's -> yours -> half -> split -> other's. The split stop
+  // opens at an even split; the slider takes it from there.
   const tapItem = (key: string) => {
-    setItems((prev) => prev.map((i) => (i.key === key ? { ...i, st: cycleState(i.st), custom: null } : i)));
-    if (splitOpen === key) setSplitOpen(null);
-    disarm();
-  };
-
-  // ÷ opens the editor (starting at an even split when the row has no
-  // custom share yet) and closes it again; closing keeps the share.
-  const toggleSplit = (key: string) => {
-    if (splitOpen === key) {
-      setSplitOpen(null);
-      setSplitText(null);
-      return;
-    }
     setItems((prev) =>
-      prev.map((i) =>
-        i.key === key && i.custom === null ? { ...i, custom: percentShare(i.price_cents, 50) } : i,
-      ),
+      prev.map((i) => {
+        if (i.key !== key) return i;
+        if (i.custom !== null) return { ...i, st: 0, custom: null };
+        if (i.st === 2) return { ...i, custom: percentShare(i.price_cents, 50) };
+        return { ...i, st: cycleState(i.st) };
+      }),
     );
-    setSplitOpen(key);
-    setSplitText(null);
     disarm();
   };
 
@@ -249,7 +233,6 @@ export function ConfirmScreen({
   const toggleItem = (key: string) => {
     setItems(toggleExcluded(items, key));
     if (editingPrice?.key === key) setEditingPrice(null);
-    if (splitOpen === key) setSplitOpen(null);
     disarm();
   };
 
@@ -540,7 +523,7 @@ export function ConfirmScreen({
                     {i.excluded
                       ? "Not on this split"
                       : i.custom !== null
-                        ? `You ${moneyAbs(i.custom)} · ${F} ${moneyAbs(i.price_cents - i.custom)}`
+                        ? `÷ ${centsToPercent(i.custom, i.price_cents)}% yours · ${moneyAbs(i.custom)}`
                         : i.st === 0
                           ? `${F}'s`
                           : i.st === 1
@@ -593,28 +576,6 @@ export function ConfirmScreen({
                   }}
                 />
                 <button
-                  onClick={() => toggleSplit(i.key)}
-                  disabled={i.excluded}
-                  aria-label={`Split ${i.label} by amount`}
-                  aria-pressed={splitOpen === i.key}
-                  title="Split by a custom amount"
-                  style={{
-                    flex: "none",
-                    width: 30,
-                    height: 30,
-                    marginLeft: 4,
-                    alignSelf: "center",
-                    border: 0,
-                    borderRadius: 8,
-                    background: splitOpen === i.key ? `${C.me}1f` : "transparent",
-                    font: `500 16px/1 ${ARCHIVO}`,
-                    color: i.excluded ? MUTED_4 : i.custom !== null ? C.me : MUTED_3,
-                    cursor: i.excluded ? "default" : "pointer",
-                  }}
-                >
-                  ÷
-                </button>
-                <button
                   onClick={() => toggleItem(i.key)}
                   aria-label={i.excluded ? `Put ${i.label} back` : `Cross out ${i.label}`}
                   title={i.excluded ? `Put ${i.label} back` : `Cross out ${i.label}`}
@@ -639,100 +600,37 @@ export function ConfirmScreen({
                 </button>
               </div>
             </div>
-            {splitOpen === i.key && !i.excluded && i.custom !== null && (
+            {!i.excluded && i.custom !== null && (
               <div
                 style={{
-                  padding: "10px 14px 12px 24px",
+                  padding: "6px 14px 12px 24px",
                   borderBottom: "1px solid rgba(0,0,0,.07)",
                   background: `${C.me}0d`,
-                  display: "flex",
-                  flexWrap: "wrap",
-                  alignItems: "center",
-                  gap: "6px 10px",
                 }}
               >
-                <span style={{ ...capsLabel, flex: "none", marginRight: 2 }}>Your share</span>
-                <span style={{ display: "inline-flex", alignItems: "baseline", gap: 3 }}>
-                  <input
-                    value={splitText?.field === "pct" ? splitText.text : String(centsToPercent(i.custom, i.price_cents))}
-                    inputMode="numeric"
-                    aria-label={`Your percent of ${i.label}`}
-                    onFocus={(e) => {
-                      setSplitText({ field: "pct", text: String(centsToPercent(i.custom ?? 0, i.price_cents)) });
-                      e.target.select();
-                    }}
-                    onChange={(e) => {
-                      const text = e.target.value.replace(/[^0-9]/g, "").slice(0, 3);
-                      setSplitText({ field: "pct", text });
-                      const pct = text === "" ? null : parseInt(text, 10);
-                      if (pct !== null && pct >= 0 && pct <= 100) setCustom(i.key, percentShare(i.price_cents, pct));
-                    }}
-                    onBlur={() => setSplitText(null)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") e.currentTarget.blur();
-                    }}
-                    style={{
-                      width: 40,
-                      border: 0,
-                      borderBottom: "1px dashed rgba(0,0,0,.28)",
-                      background: "transparent",
-                      padding: "0 0 2px",
-                      font: `500 15px ${MONO}`,
-                      fontVariantNumeric: "tabular-nums",
-                      textAlign: "right",
-                    }}
-                  />
-                  <span style={{ font: `500 13px ${MONO}`, color: MUTED_2 }}>%</span>
-                </span>
-                <span style={{ font: `500 13px ${MONO}`, color: MUTED_3 }}>or</span>
+                <div style={{ display: "flex", justifyContent: "space-between", font: `600 12px ${ARCHIVO}` }}>
+                  <span style={{ color: C.fr }}>
+                    {F} {moneyAbs(i.price_cents - i.custom)}
+                  </span>
+                  <span style={{ color: C.me }}>You {moneyAbs(i.custom)}</span>
+                </div>
                 <input
-                  value={splitText?.field === "amt" ? splitText.text : moneyAbs(i.custom)}
-                  inputMode="decimal"
-                  aria-label={`Your dollars of ${i.label}`}
-                  onFocus={(e) => {
-                    setSplitText({ field: "amt", text: moneyAbs(i.custom ?? 0) });
-                    e.target.select();
-                  }}
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={100 - centsToPercent(i.custom, i.price_cents)}
+                  aria-label={`${F}'s percent of ${i.label}`}
                   onChange={(e) => {
-                    const text = e.target.value;
-                    setSplitText({ field: "amt", text });
-                    const cents = parseDollarsToCents(text);
-                    if (cents !== null && cents <= i.price_cents) setCustom(i.key, cents);
+                    const friendPct = parseInt(e.target.value, 10);
+                    setCustom(i.key, i.price_cents - percentShare(i.price_cents, friendPct));
                   }}
-                  onBlur={() => setSplitText(null)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") e.currentTarget.blur();
-                  }}
-                  style={{
-                    width: 68,
-                    border: 0,
-                    borderBottom: "1px dashed rgba(0,0,0,.28)",
-                    background: "transparent",
-                    padding: "0 0 2px",
-                    font: `500 15px ${MONO}`,
-                    fontVariantNumeric: "tabular-nums",
-                    textAlign: "right",
-                  }}
+                  style={{ width: "100%", marginTop: 8, height: 34, accentColor: C.me }}
                 />
-                <span style={{ flex: 1, minWidth: 90, font: `500 12px ${MONO}`, color: C.fr }}>
-                  {F} {moneyAbs(i.price_cents - i.custom)}
-                </span>
-                <button
-                  onClick={() => toggleSplit(i.key)}
-                  style={{
-                    flex: "none",
-                    height: 32,
-                    padding: "0 12px",
-                    borderRadius: 10,
-                    border: 0,
-                    cursor: "pointer",
-                    font: `600 13px ${ARCHIVO}`,
-                    background: C.me,
-                    color: "#fff",
-                  }}
-                >
-                  Done
-                </button>
+                <div style={{ display: "flex", justifyContent: "space-between", font: `500 12px ${MONO}`, color: MUTED_3 }}>
+                  <span>{100 - centsToPercent(i.custom, i.price_cents)}%</span>
+                  <span>{centsToPercent(i.custom, i.price_cents)}%</span>
+                </div>
               </div>
             )}
             </div>
@@ -895,7 +793,8 @@ export function ConfirmScreen({
         <div style={{ marginTop: 14, font: `400 12.5px ${MONO}`, color: MUTED_4, lineHeight: 1.65 }}>
           How assigning works: every item starts as {F}'s. Tap it once to make
           it yours, twice to split it half-and-half (you each cover half its
-          price), and a third time to hand it back to {F}. The colored edge
+          price), a third time for a custom split (a slider sets your share),
+          and a fourth time to hand it back to {F}. The colored edge
           shows whose it is; tax and tip divide themselves in proportion to
           what each of you took.
           <br />

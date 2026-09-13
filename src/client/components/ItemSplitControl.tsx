@@ -21,6 +21,9 @@ export interface ItemSplitControlProps {
   onViewerCents: (cents: number) => void;
   /** For the slider's accessible name. */
   label: string;
+  /** Folding away: play the closing animation, then call onClosed. */
+  closing?: boolean;
+  onClosed?: () => void;
 }
 
 const capsLabel: CSSProperties = {
@@ -49,6 +52,8 @@ export function ItemSplitControl({
   viewerCents,
   onViewerCents,
   label,
+  closing = false,
+  onClosed,
 }: ItemSplitControlProps) {
   const viewerPct = centsToPercent(viewerCents, priceCents);
   const friendPct = 100 - viewerPct;
@@ -57,12 +62,17 @@ export function ItemSplitControl({
   return (
     <div
       className="split-card"
+      aria-hidden={closing}
+      onAnimationEnd={(e) => {
+        if (closing && e.target === e.currentTarget) onClosed?.();
+      }}
       style={{
         padding: "18px 18px 18px 24px",
         borderBottom: "1px solid rgba(0,0,0,.07)",
         background: `${C.me}0d`,
         overflow: "hidden",
-        animation: "splitOpen .28s ease both",
+        pointerEvents: closing ? "none" : "auto",
+        animation: closing ? "splitClose .22s ease both" : "splitOpen .28s ease both",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>

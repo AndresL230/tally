@@ -163,6 +163,20 @@ export function ConfirmScreen({
   const [totalText, setTotalText] = useState("");
   // The split row whose card is unfolded, if any. Only a ÷ tap opens it.
   const [splitOpen, setSplitOpen] = useState<string | null>(null);
+  // A card folding away keeps rendering from this snapshot until its
+  // closing animation ends (the row may already have left the split
+  // state). Under reduced motion there is no animation to wait for.
+  const [splitClosing, setSplitClosing] = useState<{ key: string; viewerCents: number; priceCents: number } | null>(
+    null,
+  );
+  const closeSplitCard = (i: ConfirmItem) => {
+    setSplitOpen(null);
+    const reduced =
+      typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (!reduced && i.custom !== null) {
+      setSplitClosing({ key: i.key, viewerCents: i.custom, priceCents: i.price_cents });
+    }
+  };
   // An even split is what the split state starts at, and what 'half' means.
   const halfOf = (priceCents: number) => percentShare(priceCents, 50);
   const isHalf = (i: ConfirmItem) => i.st === 2 && i.custom === halfOf(i.price_cents);
@@ -216,12 +230,17 @@ export function ConfirmScreen({
         return { ...i, st, custom: st === 2 ? halfOf(i.price_cents) : null };
       }),
     );
-    if (splitOpen === key) setSplitOpen(null);
+    const leaving = items.find((i) => i.key === key);
+    if (splitOpen === key && leaving) closeSplitCard(leaving);
     disarm();
   };
 
-  const toggleSplitCard = (key: string) => {
-    setSplitOpen((open) => (open === key ? null : key));
+  const toggleSplitCard = (i: ConfirmItem) => {
+    if (splitOpen === i.key) closeSplitCard(i);
+    else {
+      setSplitClosing(null);
+      setSplitOpen(i.key);
+    }
     disarm();
   };
 
@@ -259,7 +278,8 @@ export function ConfirmScreen({
   const toggleItem = (key: string) => {
     setItems(toggleExcluded(items, key));
     if (editingPrice?.key === key) setEditingPrice(null);
-    if (splitOpen === key) setSplitOpen(null);
+    const crossed = items.find((i) => i.key === key);
+    if (splitOpen === key && crossed) closeSplitCard(crossed);
     disarm();
   };
 
@@ -564,7 +584,7 @@ export function ConfirmScreen({
                 </button>
                 {i.st === 2 && i.custom !== null && !i.excluded && (
                   <button
-                    onClick={() => toggleSplitCard(i.key)}
+                    onClick={() => toggleSplitCard(i)}
                     aria-label={`${splitOpen === i.key ? "Hide" : "Adjust"} the split of ${i.label}`}
                     aria-expanded={splitOpen === i.key}
                     style={{
@@ -658,7 +678,7 @@ export function ConfirmScreen({
                 </button>
               </div>
             </div>
-            {!i.excluded && i.st === 2 && i.custom !== null && splitOpen === i.key && (
+            {!i.excluded && i.st === 2 && i.custom !== null && splitOpen === i.key ? (
               <ItemSplitControl
                 colors={C}
                 friendName={F}
@@ -667,7 +687,18 @@ export function ConfirmScreen({
                 viewerCents={i.custom}
                 onViewerCents={(cents) => setCustom(i.key, cents)}
               />
-            )}
+            ) : splitClosing?.key === i.key ? (
+              <ItemSplitControl
+                colors={C}
+                friendName={F}
+                label={i.label}
+                priceCents={splitClosing.priceCents}
+                viewerCents={splitClosing.viewerCents}
+                onViewerCents={() => {}}
+                closing
+                onClosed={() => setSplitClosing((c) => (c?.key === i.key ? null : c))}
+              />
+            ) : null}
             </div>
           ))}
 

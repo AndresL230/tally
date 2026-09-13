@@ -273,12 +273,17 @@ draws the spine cut at the rounded percent.
 Design choices worth knowing:
 
 - **The split is the fourth stop of the tap cycle**: other's, yours, half,
-  split, other's. A separate per-row control was tried first and dropped:
-  a 30px ÷ next to the 30px ✕ was a mis-tap waiting to happen on a phone,
-  and it cluttered every row for a case most rows never need. A split row
-  shows a ÷ mark in its sub-label and, beneath it, the same slider as the
-  percent screen (friend on the left, steps of five, percentages shown),
-  which is a thumb-sized control rather than two tiny text fields.
+  split, other's, opening at an even split. A per-row ÷ button on EVERY
+  row was tried first and dropped: a 30px ÷ next to the 30px ✕ was a
+  mis-tap waiting to happen on a phone, and it cluttered every row for a
+  case most rows never need. Only a split row shows the ÷ (a 38px round
+  button), and only tapping it unfolds the split card beneath the row —
+  entering the state never opens the card on its own. The card is the
+  percent screen's grammar (`ItemSplitControl`): friend's amount left,
+  yours right, one slider in steps of five with the percentages under it,
+  and 25/50/75 quick buttons; a thumb-sized control rather than two tiny
+  text fields. It unfolds with a short animation, off under
+  `prefers-reduced-motion`.
 - **Exact cents, no new rounding.** Custom cents join the existing
   half-cent accumulator as whole cents, so D1's single-rounding rule still
   holds and the payer's side is still derived by subtraction. The extra

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { BackLink } from "../components/BackLink";
+import { ItemSplitControl } from "../components/ItemSplitControl";
 import type { CSSProperties } from "react";
 import type { ApiItem } from "../../shared/types";
 import { divRoundHalfUp, percentShare, splitItems } from "../../shared/money";
@@ -42,9 +43,10 @@ import { isISODate, todayISO } from "../util";
 // shared/items.ts.
 //
 // A row can also be split by a custom amount. It is the FOURTH stop of the
-// tap cycle — other's, yours, half, split, other's — so there is no extra
-// control on the row: a split row shows a ÷ mark and a slider beneath it
-// (the same slider as the percent screen, friend on the left). That share
+// tap cycle — other's, yours, half, split, other's — and opens at an even
+// split. Only a split row shows the ÷ button; tapping it unfolds the split
+// card (ItemSplitControl, the percent screen's slider) beneath the row,
+// and tapping it again folds the card away, keeping the share. That share
 // is held here as the VIEWER's cents, ephemeral like the st codes, and
 // crosses the boundary through customToAssigned / assignedToCustom.
 
@@ -146,6 +148,8 @@ export function ConfirmScreen({
   const [editingPrice, setEditingPrice] = useState<{ key: string; text: string } | null>(null);
   const [totalFocused, setTotalFocused] = useState(false);
   const [totalText, setTotalText] = useState("");
+  // The split row whose card is unfolded, if any. Only a ÷ tap opens it.
+  const [splitOpen, setSplitOpen] = useState<string | null>(null);
   // UI -> canonical, one place for both the live split and the commit.
   const wireOf = (i: ConfirmItem): { assigned_to: string; share_cents: number | null } =>
     i.custom !== null
@@ -186,7 +190,7 @@ export function ConfirmScreen({
   const valid = hasItems && merchant.trim().length > 0 && isISODate(date);
 
   // One tap: other's -> yours -> half -> split -> other's. The split stop
-  // opens at an even split; the slider takes it from there.
+  // starts at an even split; its card stays folded until ÷ is tapped.
   const tapItem = (key: string) => {
     setItems((prev) =>
       prev.map((i) => {
@@ -196,6 +200,12 @@ export function ConfirmScreen({
         return { ...i, st: cycleState(i.st) };
       }),
     );
+    if (splitOpen === key) setSplitOpen(null);
+    disarm();
+  };
+
+  const toggleSplitCard = (key: string) => {
+    setSplitOpen((open) => (open === key ? null : key));
     disarm();
   };
 
@@ -233,6 +243,7 @@ export function ConfirmScreen({
   const toggleItem = (key: string) => {
     setItems(toggleExcluded(items, key));
     if (editingPrice?.key === key) setEditingPrice(null);
+    if (splitOpen === key) setSplitOpen(null);
     disarm();
   };
 
@@ -523,7 +534,7 @@ export function ConfirmScreen({
                     {i.excluded
                       ? "Not on this split"
                       : i.custom !== null
-                        ? `÷ ${centsToPercent(i.custom, i.price_cents)}% yours · ${moneyAbs(i.custom)}`
+                        ? `${centsToPercent(i.custom, i.price_cents)}% yours · ${moneyAbs(i.custom)}`
                         : i.st === 0
                           ? `${F}'s`
                           : i.st === 1
@@ -531,6 +542,29 @@ export function ConfirmScreen({
                             : `${moneyAbs(divRoundHalfUp(i.price_cents, 2))} each`}
                   </span>
                 </button>
+                {i.custom !== null && !i.excluded && (
+                  <button
+                    onClick={() => toggleSplitCard(i.key)}
+                    aria-label={`${splitOpen === i.key ? "Hide" : "Adjust"} the split of ${i.label}`}
+                    aria-expanded={splitOpen === i.key}
+                    style={{
+                      flex: "none",
+                      width: 38,
+                      height: 38,
+                      marginLeft: 6,
+                      alignSelf: "center",
+                      border: 0,
+                      borderRadius: 19,
+                      background: splitOpen === i.key ? C.me : `${C.me}1f`,
+                      color: splitOpen === i.key ? "#fff" : C.me,
+                      font: `600 19px/1 ${ARCHIVO}`,
+                      cursor: "pointer",
+                      transition: "background .18s ease, color .18s ease",
+                    }}
+                  >
+                    ÷
+                  </button>
+                )}
                 <span
                   style={{
                     flex: "0 1 40px",
@@ -600,38 +634,15 @@ export function ConfirmScreen({
                 </button>
               </div>
             </div>
-            {!i.excluded && i.custom !== null && (
-              <div
-                style={{
-                  padding: "6px 14px 12px 24px",
-                  borderBottom: "1px solid rgba(0,0,0,.07)",
-                  background: `${C.me}0d`,
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", font: `600 12px ${ARCHIVO}` }}>
-                  <span style={{ color: C.fr }}>
-                    {F} {moneyAbs(i.price_cents - i.custom)}
-                  </span>
-                  <span style={{ color: C.me }}>You {moneyAbs(i.custom)}</span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={5}
-                  value={100 - centsToPercent(i.custom, i.price_cents)}
-                  aria-label={`${F}'s percent of ${i.label}`}
-                  onChange={(e) => {
-                    const friendPct = parseInt(e.target.value, 10);
-                    setCustom(i.key, i.price_cents - percentShare(i.price_cents, friendPct));
-                  }}
-                  style={{ width: "100%", marginTop: 8, height: 34, accentColor: C.me }}
-                />
-                <div style={{ display: "flex", justifyContent: "space-between", font: `500 12px ${MONO}`, color: MUTED_3 }}>
-                  <span>{100 - centsToPercent(i.custom, i.price_cents)}%</span>
-                  <span>{centsToPercent(i.custom, i.price_cents)}%</span>
-                </div>
-              </div>
+            {!i.excluded && i.custom !== null && splitOpen === i.key && (
+              <ItemSplitControl
+                colors={C}
+                friendName={F}
+                label={i.label}
+                priceCents={i.price_cents}
+                viewerCents={i.custom}
+                onViewerCents={(cents) => setCustom(i.key, cents)}
+              />
             )}
             </div>
           ))}

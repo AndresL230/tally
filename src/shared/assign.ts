@@ -1,3 +1,5 @@
+import { divRoundHalfUp } from "./money";
+
 // The confirm screen's three-state item toggle. The st codes (0/1/2) are
 // EPHEMERAL UI STATE only — everything posted or stored is canonical
 // (an email or the literal 'half'); translation happens exactly here, at
@@ -54,4 +56,53 @@ export function assignedToState(
  *  list is false — the confirm screen must not commit zero items. */
 export function needsBeatConfirm(states: readonly ItemState[]): boolean {
   return states.length > 0 && states.every((st) => st === 0);
+}
+
+// ---------------------------------------------------------------------------
+// Custom splits. The confirm screen holds a custom split as the VIEWER's
+// cents of the item — ephemeral UI state like the st codes — and translates
+// at the same boundary: anchored on the viewer's email with share_cents
+// going out, back to the viewer's cents from either anchor coming in.
+// ---------------------------------------------------------------------------
+
+/** UI -> canonical at POST time: the viewer pays viewerCents of the item. */
+export function customToAssigned(
+  viewerCents: number,
+  viewerEmail: string,
+  friendEmail: string,
+): { assigned_to: string; share_cents: number } {
+  if (viewerEmail === friendEmail) {
+    throw new Error("viewer and friend must be different people");
+  }
+  if (!Number.isSafeInteger(viewerCents) || viewerCents < 0) {
+    throw new Error("viewerCents must be a non-negative integer");
+  }
+  return { assigned_to: viewerEmail, share_cents: viewerCents };
+}
+
+/** Canonical -> the viewer's cents when loading, or null when the item is
+ *  not custom-split. The anchor may be either member. */
+export function assignedToCustom(
+  assigned: string | null,
+  shareCents: number | null,
+  priceCents: number,
+  viewerEmail: string,
+  friendEmail: string,
+): number | null {
+  if (viewerEmail === friendEmail) {
+    throw new Error("viewer and friend must be different people");
+  }
+  if (shareCents === null) return null;
+  if (!Number.isSafeInteger(shareCents) || shareCents < 0 || shareCents > priceCents) {
+    throw new Error("share_cents must be an integer between 0 and price_cents");
+  }
+  if (assigned === viewerEmail) return shareCents;
+  if (assigned === friendEmail) return priceCents - shareCents;
+  throw new Error(`share_cents needs a member email anchor, got ${assigned}`);
+}
+
+/** The whole percent that cents is of price (halves up); 0 of a free item. */
+export function centsToPercent(cents: number, priceCents: number): number {
+  if (priceCents === 0) return 0;
+  return divRoundHalfUp(cents * 100, priceCents);
 }

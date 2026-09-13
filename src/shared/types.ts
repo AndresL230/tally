@@ -62,6 +62,9 @@ export interface ApiItem {
   qty: string | null;
   price_cents: number | null;
   assigned_to: AssignedTo | null;
+  /** Custom split: the member in assigned_to pays exactly this many cents
+   *  of the item, the other member the rest. NULL = the whole item. */
+  share_cents: number | null;
 }
 
 export interface ApiExpense {

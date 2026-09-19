@@ -170,12 +170,13 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  /** Raw image bytes up; the client-minted UUID is the receipt PK. Returns
-   *  the (possibly deduped, possibly already-extracted) receipt + items. */
-  uploadReceipt: (ledgerId: string, id: string, blob: Blob) =>
+  /** Raw receipt bytes up — a photo or a PDF, the blob's own type decides.
+   *  The client-minted UUID is the receipt PK. Returns the (possibly
+   *  deduped, possibly already-extracted) receipt + items. */
+  uploadReceipt: (ledgerId: string, id: string, blob: Blob, contentType?: string) =>
     request<ReceiptResponse>(`/api/ledgers/${ledgerId}/receipts?id=${encodeURIComponent(id)}`, {
       method: "POST",
-      headers: { "Content-Type": blob.type || "image/jpeg" },
+      headers: { "Content-Type": contentType || blob.type || "image/jpeg" },
       body: blob,
     }),
   extractReceipt: (receiptId: string) =>

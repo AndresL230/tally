@@ -98,6 +98,15 @@ function fakeImage(seed: string, length = 256): Uint8Array {
   return bytes;
 }
 
+/** The same, as a PDF: %PDF- magic prefix (again, only the Content-Type is
+ *  validated server-side — no parsing). */
+function fakePdf(seed: string, length = 256): Uint8Array {
+  const bytes = fakeImage(seed, length);
+  const magic = "%PDF-";
+  for (let i = 0; i < magic.length; i++) bytes[i] = magic.charCodeAt(i);
+  return bytes;
+}
+
 function toHex(buf: ArrayBuffer): string {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -456,6 +465,46 @@ describe("POST /api/ledgers/:id/receipts — upload", () => {
     expect(await countReceipts(otherLedger)).toBe(1);
   });
 
+  it("application/pdf is accepted: 201, stored under a .pdf key with its own content type", async () => {
+    const clientId = crypto.randomUUID();
+    const bytes = fakePdf("emailed-receipt");
+    const res = await uploadReceipt(ledgerId, ALEX, bytes, {
+      id: clientId,
+      contentType: "application/pdf",
+    });
+    expect(res.status).toBe(201);
+
+    const json = (await res.json()) as ReceiptResponse;
+    expect(json.receipt.id).toBe(clientId);
+    expect(json.receipt.status).toBe("uploaded");
+    expect(json.items).toEqual([]);
+
+    const row = await receiptRow(clientId);
+    expect(row!.sha256).toBe(toHex(await crypto.subtle.digest("SHA-256", bytes)));
+    expect(row!.r2_key).toBe(`receipts/${ledgerId}/${clientId}.pdf`);
+    const head = await env.RECEIPTS.head(row!.r2_key!);
+    expect(head).not.toBeNull();
+    expect(head!.size).toBe(bytes.length);
+    expect(head!.httpMetadata?.contentType).toBe("application/pdf");
+  });
+
+  it("a PDF and a photo of the same receipt are different bytes => two receipts", async () => {
+    const pdfId = crypto.randomUUID();
+    expect(
+      (
+        await uploadReceipt(ledgerId, ALEX, fakePdf("both-ways"), {
+          id: pdfId,
+          contentType: "application/pdf",
+        })
+      ).status,
+    ).toBe(201);
+    const photoId = crypto.randomUUID();
+    expect(
+      (await uploadReceipt(ledgerId, ALEX, fakeImage("both-ways"), { id: photoId })).status,
+    ).toBe(201);
+    expect(await countReceipts(ledgerId)).toBe(2);
+  });
+
   it("image/png and image/webp are accepted", async () => {
     expect(
       (await uploadReceipt(ledgerId, ALEX, fakeImage("png"), { contentType: "image/png" })).status,
@@ -801,7 +850,52 @@ describe("POST /api/receipts/:rid/extract — gating, failures, cache", () => {
     expect(imageBlock).toBeDefined();
     const source = imageBlock!["source"] as Record<string, unknown>;
     expect(source["type"]).toBe("base64");
+    expect(source["media_type"]).toBe("image/jpeg");
     expect(source["data"]).toBe(toBase64(bytes));
+  });
+
+  it("a PDF receipt goes to the model as a base64 DOCUMENT block, not an image block", async () => {
+    const bytes = fakePdf("pdf-request-shape");
+    const clientId = crypto.randomUUID();
+    expect(
+      (
+        await uploadReceipt(ledgerId, ALEX, bytes, {
+          id: clientId,
+          contentType: "application/pdf",
+        })
+      ).status,
+    ).toBe(201);
+
+    let captured = "";
+    interceptGateway(cleanFixture, {
+      onBody: (body) => {
+        captured = body;
+      },
+    });
+
+    const res = await extract(clientId, ALEX);
+    expect(res.status).toBe(200);
+
+    const body = JSON.parse(captured) as { messages?: Array<{ content?: unknown }> };
+    const blocks: Array<Record<string, unknown>> = [];
+    for (const msg of body.messages ?? []) {
+      if (Array.isArray(msg.content)) {
+        for (const block of msg.content as Array<Record<string, unknown>>) blocks.push(block);
+      }
+    }
+    expect(blocks.find((b) => b["type"] === "image")).toBeUndefined();
+    const documentBlock = blocks.find((b) => b["type"] === "document");
+    expect(documentBlock).toBeDefined();
+    const source = documentBlock!["source"] as Record<string, unknown>;
+    expect(source["type"]).toBe("base64");
+    expect(source["media_type"]).toBe("application/pdf");
+    expect(source["data"]).toBe(toBase64(bytes));
+
+    // Same outcome as a photo: extracted fields land on the receipt.
+    const json = (await res.json()) as ReceiptResponse;
+    expect(json.receipt.status).toBe("needs_review");
+    expect(json.receipt.total_cents).toBe(7550);
+    expect(json.items).toHaveLength(6);
   });
 
   it("extract on a POSTED receipt => 409, status unchanged", async () => {

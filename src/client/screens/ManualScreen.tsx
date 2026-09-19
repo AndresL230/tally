@@ -10,7 +10,8 @@ import { isISODate, todayISO } from "../util";
 
 // Port of the mockup's manual screen (sc-if isManual), with two copy
 // variants: 'photofail' keeps the mockup's failure copy + Retake photo
-// (wired in M2); 'byhand' is the non-apologetic M1 entry point.
+// (wired in M2), worded for a PDF when that is what failed; 'byhand' is
+// the non-apologetic M1 entry point.
 //
 // The percentage split control is added per the spec (owner ruling: manual
 // entry gains a percentage split control the mockup lacks).
@@ -27,13 +28,17 @@ export interface ManualCommit {
 
 export interface ManualScreenProps {
   reason: "byhand" | "photofail";
+  /** photofail only: what didn't read, so the copy and the retry button
+   *  match it. A PDF is never "too dark" and can't be re-shot. */
+  source?: "photo" | "pdf";
   colors: Colors;
   friendName: string;
   viewerEmail: string;
   friendEmail: string;
   onCancel: () => void;
   onCommit: (payload: ManualCommit) => void;
-  /** photofail only; the camera flow arrives with M2. */
+  /** photofail only; re-opens the camera for a photo, the file picker for
+   *  a PDF. */
   onRetake?: () => void;
 }
 
@@ -58,6 +63,7 @@ const labelCap: CSSProperties = {
 
 export function ManualScreen({
   reason,
+  source = "photo",
   colors: C,
   friendName: F,
   viewerEmail,
@@ -124,12 +130,21 @@ export function ManualScreen({
 
         <div style={{ marginTop: 18, borderLeft: `3px solid ${C.me}`, paddingLeft: 14 }}>
           {reason === "photofail" ? (
-            <>
-              <div style={{ fontFamily: SERIF, fontSize: 30, lineHeight: 1.15 }}>No text in that photo.</div>
-              <div style={{ marginTop: 8, font: `400 15px ${ARCHIVO}`, lineHeight: 1.5, color: MUTED_1 }}>
-                The image was too dark to find a total. Type it in below, or shoot it again with the receipt flat and lit.
-              </div>
-            </>
+            source === "pdf" ? (
+              <>
+                <div style={{ fontFamily: SERIF, fontSize: 30, lineHeight: 1.15 }}>No total in that PDF.</div>
+                <div style={{ marginTop: 8, font: `400 15px ${ARCHIVO}`, lineHeight: 1.5, color: MUTED_1 }}>
+                  Nothing in the file read as a receipt. Type it in below, or pick a different file.
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontFamily: SERIF, fontSize: 30, lineHeight: 1.15 }}>No text in that photo.</div>
+                <div style={{ marginTop: 8, font: `400 15px ${ARCHIVO}`, lineHeight: 1.5, color: MUTED_1 }}>
+                  The image was too dark to find a total. Type it in below, or shoot it again with the receipt flat and lit.
+                </div>
+              </>
+            )
           ) : (
             <>
               <div style={{ fontFamily: SERIF, fontSize: 30, lineHeight: 1.15 }}>Enter it by hand.</div>
@@ -153,7 +168,7 @@ export function ManualScreen({
               cursor: "pointer",
             }}
           >
-            Retake photo
+            {source === "pdf" ? "Choose another file" : "Retake photo"}
           </button>
         )}
 

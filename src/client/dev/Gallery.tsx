@@ -279,6 +279,23 @@ export const STATES: GalleryState[] = [
     ),
   },
   {
+    id: "manual-pdffail",
+    label: "PDF didn't read",
+    render: (C) => (
+      <ManualScreen
+        reason="photofail"
+        source="pdf"
+        colors={C}
+        friendName={F}
+        viewerEmail={VIEWER}
+        friendEmail={FRIEND}
+        onCancel={log("cancel manual")}
+        onCommit={log("commit manual")}
+        onRetake={log("choose another file")}
+      />
+    ),
+  },
+  {
     id: "settle",
     label: "Settle up",
     render: (C) => (

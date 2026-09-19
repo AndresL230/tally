@@ -300,3 +300,29 @@ Design choices worth knowing:
 - **A quantity line with a custom share is not expanded into units.** A cut
   of the whole line cannot be spread over its units without inventing a
   rounding rule, so `expandQtyItems` passes it through unchanged.
+
+## D18. A receipt can be a PDF, not only a photo
+
+The spec and mockup assume a camera: photograph the paper, upload the
+image, read it. Plenty of receipts never exist on paper — they arrive as a
+PDF by email, or download as one from an online order — and the round trip
+of printing or photographing a screen to feed such a receipt in was pure
+loss.
+
+- `application/pdf` joins the three photo codecs the upload route accepts
+  (`src/worker/receipts.ts`), under the same 8 MB cap: base64 inflates by
+  4/3 on the way to the model, so that stays well inside the Messages
+  API's 32 MB request ceiling.
+- The stored object keeps its own content type and a `.pdf` key suffix;
+  photos keep the contract's `.jpg` suffix whatever their codec, so
+  existing keys are untouched.
+- Extraction sends a PDF as a base64 `document` block instead of an
+  `image` block (`src/worker/extract.ts`) — same model, same forced
+  `record_receipt` tool, same salvage, same one-call-per-receipt caching
+  and SHA-256 dedupe. A PDF past the model's page limit fails at the
+  gateway and lands on `failed` like any unreadable photo.
+- Client side, the library picker accepts `image/*,application/pdf` (the
+  camera button stays photo-only) and a PDF skips the rule-8 downscale,
+  which has nothing to do to it. The failure screen says "No total in that
+  PDF" and offers "Choose another file" rather than telling someone to
+  re-shoot a document with the receipt "flat and lit".

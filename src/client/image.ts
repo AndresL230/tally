@@ -2,11 +2,35 @@
 // 1500px (never upscaled), re-encoded as JPEG at quality 0.85. A failed
 // downscale must not block adding a receipt: fall back to the original
 // bytes (logged) and let the server take it from there.
+//
+// A receipt can also arrive as a PDF (emailed or downloaded rather than
+// photographed). There is nothing to downscale there — those bytes go up
+// exactly as picked, and the server sends them to the model as a document.
 
 const MAX_EDGE = 1500;
 const JPEG_QUALITY = 0.85;
 
+export const PDF_TYPE = "application/pdf";
+
+/** What the file pickers accept, and what a drop is judged against. */
+export const RECEIPT_ACCEPT = `image/*,${PDF_TYPE}`;
+
+/** What a picked file goes up as. Some pickers hand over a PDF with an
+ *  empty `type`, and the name is then the only clue; anything else keeps
+ *  the server's own default. */
+export function receiptTypeOf(file: File): string {
+  if (file.type) return file.type;
+  return file.name.toLowerCase().endsWith(".pdf") ? PDF_TYPE : "";
+}
+
+export function isReceiptFile(file: File): boolean {
+  return file.type.startsWith("image/") || receiptTypeOf(file) === PDF_TYPE;
+}
+
 export async function downscaleImage(file: File | Blob): Promise<Blob> {
+  // A PDF has nothing to downscale; it goes up byte for byte.
+  if (file.type === PDF_TYPE) return file;
+
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file);

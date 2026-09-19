@@ -5,7 +5,15 @@ import { ledgerForMember, type LedgerRow } from "./db";
 import { GatewayError, runExtraction, type ExtractionFields } from "./extract";
 import { ValidationError, assertId } from "./validate";
 
-const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+// What a receipt can arrive as: the three photo codecs, plus PDF — an
+// emailed or downloaded receipt is a document, not a photograph, and the
+// model reads both through the same extraction call.
+const PDF_TYPE = "application/pdf";
+const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", PDF_TYPE]);
+// One cap for both kinds. Base64 inflates by 4/3 on the way to the model,
+// so 8 MB of stored bytes stays well inside the Messages API's 32 MB
+// request ceiling. (A PDF past its page limit fails at the gateway and
+// lands on 'failed' like any other unreadable receipt.)
 const MAX_BYTES = 8_000_000;
 
 // Scan caps. Upload is the choke point (extract is once-per-image), and the
@@ -107,12 +115,14 @@ export function registerReceipts(app: Hono<AppContext>): void {
     const id = assertId(c.req.query("id"), "id");
     const contentType = (c.req.header("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
     if (!ALLOWED_TYPES.has(contentType)) {
-      throw new ValidationError("content-type must be image/jpeg, image/png or image/webp");
+      throw new ValidationError(
+        "content-type must be image/jpeg, image/png, image/webp or application/pdf",
+      );
     }
     const bytes = await c.req.arrayBuffer();
-    if (bytes.byteLength === 0) throw new ValidationError("empty image");
+    if (bytes.byteLength === 0) throw new ValidationError("empty upload");
     if (bytes.byteLength > MAX_BYTES) {
-      return c.json({ error: "image too large" }, 413);
+      return c.json({ error: "receipt too large" }, 413);
     }
 
     const sha = await sha256Hex(bytes);
@@ -163,7 +173,9 @@ export function registerReceipts(app: Hono<AppContext>): void {
     // sha unique decides the winner before any bytes land in R2, so the
     // stored object can never disagree with the row's sha256 and a losing
     // dedupe race leaves no orphan object.
-    const r2Key = `receipts/${ledger.id}/${id}.jpg`;
+    // Photos keep the contract's .jpg suffix whatever their codec; a PDF
+    // says so, since the stored content type is what extract reads back.
+    const r2Key = `receipts/${ledger.id}/${id}.${contentType === PDF_TYPE ? "pdf" : "jpg"}`;
     try {
       await c.env.DB.prepare(
         `INSERT INTO receipts (id, ledger_id, r2_key, sha256, status, uploaded_by, created_at)
@@ -224,7 +236,7 @@ export function registerReceipts(app: Hono<AppContext>): void {
       return c.json({ error: "extraction not configured" }, 503);
     }
     if (!receipt.r2_key) {
-      return c.json({ error: "receipt has no stored image" }, 500);
+      return c.json({ error: "receipt has no stored file" }, 500);
     }
 
     // Claim the job with a conditional write so two members scanning the
@@ -252,7 +264,7 @@ export function registerReceipts(app: Hono<AppContext>): void {
         await c.env.DB.prepare("UPDATE receipts SET status = 'failed' WHERE id = ?1")
           .bind(receipt.id)
           .run();
-        return c.json({ error: "stored image is missing" }, 500);
+        return c.json({ error: "stored receipt is missing" }, 500);
       }
       const { raw, fields } = await runExtraction(
         c.env,

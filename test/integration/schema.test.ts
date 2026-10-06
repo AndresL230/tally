@@ -17,7 +17,15 @@ describe("migrations from zero", () => {
       "SELECT name, type FROM sqlite_master WHERE type IN ('table','view') ORDER BY name",
     ).all<{ name: string; type: string }>();
     const names = results.map((r) => r.name);
-    for (const t of ["users", "ledgers", "expenses", "settlements", "receipts", "receipt_items"]) {
+    for (const t of [
+      "users",
+      "ledgers",
+      "expenses",
+      "settlements",
+      "receipts",
+      "receipt_items",
+      "receipt_pages",
+    ]) {
       expect(names).toContain(t);
     }
     expect(results.find((r) => r.name === "ledger_entries")?.type).toBe("view");

@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import type { ApiEntry, ApiItem, ApiReceipt, LedgerDetail, LedgerSummary, UserPrefs } from "../shared/types";
+import {
+  MAX_RECEIPT_PAGES,
+  type ApiEntry,
+  type ApiItem,
+  type ApiReceipt,
+  type LedgerDetail,
+  type LedgerSummary,
+  type UserPrefs,
+} from "../shared/types";
 import { otherMember, viewerDelta } from "../shared/ledger";
 import { ApiError, api } from "./api";
-import { PDF_TYPE, RECEIPT_ACCEPT, downscaleImage, isReceiptFile, receiptTypeOf } from "./image";
+import { RECEIPT_ACCEPT, downscaleImage, isReceiptFile, receiptTypeOf, scanSourceOf, type ScanSource } from "./image";
 import { ARCHIVO, DEFAULT_ACCENT, MONO, SERIF, colorsFor, type Colors } from "./theme";
 import { LedgerScreen } from "./screens/LedgerScreen";
 import { PickerScreen } from "./screens/PickerScreen";
@@ -99,13 +107,13 @@ export default function App() {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const libraryInputRef = useRef<HTMLInputElement>(null);
   // What the last scan was fed, so a failure can say so and offer the right
-  // way back in (the camera for a photo, the picker for a PDF).
-  const [scanKind, setScanKind] = useState<"photo" | "pdf">("photo");
-  // The receipt upload gets its own UUID, one per photo: re-picking the
-  // same file (a retry) reuses it, so the repeat POST is the dedupe path.
+  // way back in (the camera for one photo, the picker for anything else).
+  const [scanKind, setScanKind] = useState<ScanSource>("photo");
+  // The receipt upload gets its own UUID, one per pick: re-picking the same
+  // files (a retry) reuses it, so the repeat POST is the dedupe path.
   const lastPickRef = useRef<{ key: string; id: string } | null>(null);
-  const receiptIdFor = (file: File) => {
-    const key = `${file.name}|${file.size}|${file.lastModified}`;
+  const receiptIdFor = (files: File[]) => {
+    const key = files.map((f) => `${f.name}|${f.size}|${f.lastModified}`).join("/");
     if (lastPickRef.current?.key !== key) {
       lastPickRef.current = { key, id: crypto.randomUUID() };
     }
@@ -414,17 +422,23 @@ export default function App() {
 
   /** Downscale -> reading screen -> upload -> extract -> route per contract.
    *  ONE round-trip; the reading steps are presentation while it runs. A PDF
-   *  passes through the downscale step untouched. */
-  const runScan = async (file: File) => {
+   *  passes through the downscale step untouched. Several files are pages
+   *  of ONE receipt, in the order they were picked, read in one call. */
+  const runScan = async (files: File[]) => {
+    if (files.length === 0) return;
+    if (files.length > MAX_RECEIPT_PAGES) {
+      setFlash(`One receipt takes up to ${MAX_RECEIPT_PAGES} photos or files.`);
+      return;
+    }
     const token = ++scanTokenRef.current;
     const live = () => scanTokenRef.current === token;
     // The upload's own idempotency UUID: minted once per pick, reused on a
-    // retry of the same file, and the receipt PK server-side. (Re-shooting
+    // retry of the same files, and the receipt PK server-side. (Re-shooting
     // the same paper receipt, or re-picking the same PDF, dedupes on the
     // SHA-256 regardless.)
-    const receiptId = receiptIdFor(file);
+    const receiptId = receiptIdFor(files);
 
-    setScanKind(receiptTypeOf(file) === PDF_TYPE ? "pdf" : "photo");
+    setScanKind(scanSourceOf(files));
     clearIntent();
     setFlow(null);
     setFlash(null);
@@ -453,15 +467,15 @@ export default function App() {
     };
 
     try {
-      const blob = await downscaleImage(file);
       // The downscale decides the type when it re-encodes; a PDF (or an
       // image the canvas couldn't decode) keeps whatever the pick said.
-      const up = await api.uploadReceipt(
-        detail.ledger.id,
-        receiptId,
-        blob,
-        blob.type || receiptTypeOf(file),
+      const pages = await Promise.all(
+        files.map(async (file) => {
+          const blob = await downscaleImage(file);
+          return { blob, type: blob.type || receiptTypeOf(file) };
+        }),
       );
+      const up = await api.uploadReceipt(detail.ledger.id, receiptId, pages);
       if (!live()) return;
 
       // Dedupe UX: same bytes as a receipt that's already posted — nothing
@@ -529,9 +543,9 @@ export default function App() {
   };
 
   const onFilePicked: React.ChangeEventHandler<HTMLInputElement> = (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-picking the same file later
-    if (file) void runScan(file);
+    const files = [...(e.target.files ?? [])];
+    e.target.value = ""; // allow re-picking the same files later
+    void runScan(files);
   };
 
   /** Reading-screen Cancel: abort navigation; the receipt stays (the user
@@ -760,7 +774,7 @@ export default function App() {
           }}
           onCommit={commitManual}
           onRetake={() =>
-            (scanKind === "pdf" ? libraryInputRef : cameraInputRef).current?.click()
+            (scanKind === "photo" ? cameraInputRef : libraryInputRef).current?.click()
           }
         />
       );
@@ -880,8 +894,9 @@ export default function App() {
 
   // Hidden pickers behind the add-receipt sheet's buttons; the camera one is
   // also what "Retake photo" re-opens, so it stays photo-only. The other
-  // takes a PDF as readily as a picture. On desktop the browser ignores
-  // `capture` and both open the file dialog.
+  // takes a PDF as readily as a picture, and several at once — the pages
+  // of one receipt. On desktop the browser ignores `capture` and both open
+  // the file dialog.
   const hiddenInputs = (
     <>
       <input
@@ -896,6 +911,7 @@ export default function App() {
         ref={libraryInputRef}
         type="file"
         accept={RECEIPT_ACCEPT}
+        multiple
         style={{ display: "none" }}
         onChange={onFilePicked}
       />
@@ -934,8 +950,8 @@ export default function App() {
             e.preventDefault();
             setDragOver(false);
             if (!canDrop || busy) return;
-            const file = e.dataTransfer.files?.[0];
-            if (file && isReceiptFile(file)) void runScan(file);
+            const files = [...(e.dataTransfer.files ?? [])].filter(isReceiptFile);
+            void runScan(files);
           }}
         >
           {body}
@@ -955,7 +971,7 @@ export default function App() {
                 color: colors.me,
               }}
             >
-              Drop the receipt — photo or PDF
+              Drop the receipt — photos or PDF
             </div>
           )}
         </div>

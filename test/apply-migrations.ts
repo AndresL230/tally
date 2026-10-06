@@ -14,6 +14,7 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM receipt_items"),
     env.DB.prepare("DELETE FROM expenses"), // references receipts + ledgers
     env.DB.prepare("DELETE FROM settlements"),
+    env.DB.prepare("DELETE FROM receipt_pages"), // references receipts
     env.DB.prepare("DELETE FROM receipts"),
     env.DB.prepare("DELETE FROM ledgers"),
     env.DB.prepare("DELETE FROM users"),

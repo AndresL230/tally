@@ -326,3 +326,36 @@ loss.
   which has nothing to do to it. The failure screen says "No total in that
   PDF" and offers "Choose another file" rather than telling someone to
   re-shoot a document with the receipt "flat and lit".
+
+## D19. A receipt can be several files
+
+The spec assumes one photo per receipt. A long grocery receipt doesn't fit
+in one legible frame, some receipts carry the total on the back, and a
+PDF bill sometimes comes with a photo of the slip where the tip was
+written in. Squeezing those into one image either loses resolution (the
+model reads at ~1500px on the long edge, so a stitched strip becomes
+unreadable) or loses half the receipt.
+
+- The upload route also takes `multipart/form-data` with one `page` part
+  per file, in reading order (`src/worker/receipts.ts`). A raw body is
+  still one page, exactly as before. Each page is a JPEG, PNG, WebP or
+  PDF under the 8 MB cap; up to `MAX_RECEIPT_PAGES` (10, in
+  `src/shared/types.ts`) pages and 20 MB in all, so the base64 request
+  stays inside the Messages API's 32 MB ceiling.
+- `receipts.r2_key` stays page 1, so existing rows are one-page receipts
+  with no backfill; pages 2..n go in a new `receipt_pages` table
+  (`migrations/0005_receipt_pages.sql`) and R2 under `<id>-<n>.<ext>`.
+- Dedupe still works on one key per receipt: a single page hashes as it
+  always has (so a one-file upload still finds older receipts), several
+  pages hash their ordered per-page SHA-256s under a `pages:` prefix. The
+  same photos in a different order are a different receipt.
+- Extraction sends every page in ONE call, one block per page in order,
+  with a prompt that says they are one receipt and that a line visible on
+  two overlapping photos is still one item (`src/worker/extract.ts`).
+  Still one model call per receipt, cached.
+- A several-page upload counts once against the daily scan caps.
+- Client side, the library picker takes several files at once and a drop
+  takes all the receipt files dropped; each photo is downscaled on its
+  own. The camera button stays one shot. When a several-file receipt
+  doesn't read, the failure screen says "those photos" / "those files"
+  and re-opens the picker rather than the camera.

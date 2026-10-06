@@ -1,7 +1,8 @@
 // Receipt extraction through Cloudflare AI Gateway -> Anthropic Messages
 // API. ONE call per receipt ever: uploads dedupe on SHA-256 and results are
 // cached in receipts.raw_json. A receipt is a photo (JPEG/PNG/WebP) or a
-// PDF; both ride the same call.
+// PDF — or several of them, read together as one receipt — and every kind
+// rides the same call.
 //
 // Rule 7: the request forces a tool call (tool_choice) AND the output is
 // schema-validated anyway — a negative price or garbage date degrades to
@@ -15,7 +16,7 @@ export const EXTRACT_MODEL = "claude-haiku-4-5";
 const RECEIPT_TOOL = {
   name: "record_receipt",
   description:
-    "Record the fields read from a receipt — a photo of one, or a PDF. All amounts are integer cents (e.g. $12.34 is 1234). If it is not a receipt, set looks_like_receipt to false and leave everything else null.",
+    "Record the fields read from a receipt — a photo of one, a PDF, or several photos or files that together make up one receipt. All amounts are integer cents (e.g. $12.34 is 1234). If it is not a receipt, set looks_like_receipt to false and leave everything else null.",
   input_schema: {
     type: "object",
     properties: {
@@ -184,29 +185,49 @@ function base64Of(bytes: ArrayBuffer): string {
   return btoa(binary);
 }
 
+/** One file of a receipt, as stored: its bytes and its content type. */
+export interface ReceiptPage {
+  bytes: ArrayBuffer;
+  mediaType: string;
+}
+
+const SINGLE_PAGE_PROMPT =
+  "Read this receipt and record its fields. Integer cents. Only real line items — never tax, tip, subtotal or total rows as items.";
+
+function multiPagePrompt(count: number): string {
+  return (
+    `These ${count} files are ONE receipt, in order — a long receipt photographed in parts, ` +
+    "or its front and back. Read them together and record that one receipt's fields. " +
+    "Where the photos overlap, a line that shows up on two of them is still one item. " +
+    "Integer cents. Only real line items — never tax, tip, subtotal or total rows as items."
+  );
+}
+
 /**
  * The single model call. Returns the raw response text (cached verbatim in
  * receipts.raw_json) plus the salvaged fields. Throws GatewayError on
  * HTTP/network failure — the route turns that into status 'failed'.
  *
  * A photo goes up as an `image` block, a PDF as a `document` block — same
- * base64 source, same tool, same salvage; only the block type differs.
+ * base64 source, same tool, same salvage; only the block type differs. A
+ * receipt of several pages sends one block per page, in order, still in
+ * ONE call.
  */
 export async function runExtraction(
   env: Env,
-  receiptBytes: ArrayBuffer,
-  mediaType: string,
+  pages: ReceiptPage[],
 ): Promise<{ raw: string; fields: ExtractionFields }> {
   const url = `https://gateway.ai.cloudflare.com/v1/${env.AI_GATEWAY_ACCOUNT_ID}/${env.AI_GATEWAY_ID}/anthropic/v1/messages`;
-  const source = {
-    type: "base64",
-    media_type: mediaType,
-    data: base64Of(receiptBytes),
-  };
-  const receiptBlock =
-    mediaType === "application/pdf"
+  const pageBlocks = pages.map(({ bytes, mediaType }) => {
+    const source = {
+      type: "base64",
+      media_type: mediaType,
+      data: base64Of(bytes),
+    };
+    return mediaType === "application/pdf"
       ? { type: "document", source }
       : { type: "image", source };
+  });
   const request = {
     model: EXTRACT_MODEL,
     max_tokens: 2048,
@@ -216,10 +237,10 @@ export async function runExtraction(
       {
         role: "user",
         content: [
-          receiptBlock,
+          ...pageBlocks,
           {
             type: "text",
-            text: "Read this receipt and record its fields. Integer cents. Only real line items — never tax, tip, subtotal or total rows as items.",
+            text: pages.length > 1 ? multiPagePrompt(pages.length) : SINGLE_PAGE_PROMPT,
           },
         ],
       },

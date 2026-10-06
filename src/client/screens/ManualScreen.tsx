@@ -7,11 +7,12 @@ import { moneyAbs, parseDollarsToCents } from "../../shared/format";
 import { ARCHIVO, MONO, MUTED_1, MUTED_3, SERIF, type Colors } from "../theme";
 import { PercentControl } from "../components/PercentControl";
 import { isISODate, todayISO } from "../util";
+import type { ScanSource } from "../image";
 
 // Port of the mockup's manual screen (sc-if isManual), with two copy
 // variants: 'photofail' keeps the mockup's failure copy + Retake photo
-// (wired in M2), worded for a PDF when that is what failed; 'byhand' is
-// the non-apologetic M1 entry point.
+// (wired in M2), worded for a PDF or a several-file receipt when that is
+// what failed; 'byhand' is the non-apologetic M1 entry point.
 //
 // The percentage split control is added per the spec (owner ruling: manual
 // entry gains a percentage split control the mockup lacks).
@@ -29,16 +30,17 @@ export interface ManualCommit {
 export interface ManualScreenProps {
   reason: "byhand" | "photofail";
   /** photofail only: what didn't read, so the copy and the retry button
-   *  match it. A PDF is never "too dark" and can't be re-shot. */
-  source?: "photo" | "pdf";
+   *  match it. A PDF is never "too dark" and can't be re-shot, and a
+   *  several-file receipt is picked again rather than shot one frame. */
+  source?: ScanSource;
   colors: Colors;
   friendName: string;
   viewerEmail: string;
   friendEmail: string;
   onCancel: () => void;
   onCommit: (payload: ManualCommit) => void;
-  /** photofail only; re-opens the camera for a photo, the file picker for
-   *  a PDF. */
+  /** photofail only; re-opens the camera for one photo, the file picker
+   *  for a PDF or several files. */
   onRetake?: () => void;
 }
 
@@ -51,6 +53,29 @@ const TAX_REGIONS = [
   { key: "ny", label: "NY 8.875%", rate: 8875 },
 ] as const;
 type TaxRegionKey = (typeof TAX_REGIONS)[number]["key"];
+
+const FAIL_COPY: Record<ScanSource, { title: string; body: string; retry: string }> = {
+  photo: {
+    title: "No text in that photo.",
+    body: "The image was too dark to find a total. Type it in below, or shoot it again with the receipt flat and lit.",
+    retry: "Retake photo",
+  },
+  pdf: {
+    title: "No total in that PDF.",
+    body: "Nothing in the file read as a receipt. Type it in below, or pick a different file.",
+    retry: "Choose another file",
+  },
+  photos: {
+    title: "No total in those photos.",
+    body: "Together they didn't read as a receipt. Type it in below, or pick them again with the receipt flat and lit in each.",
+    retry: "Choose photos again",
+  },
+  files: {
+    title: "No total in those files.",
+    body: "Together they didn't read as a receipt. Type it in below, or pick different files.",
+    retry: "Choose files again",
+  },
+};
 
 const labelCap: CSSProperties = {
   display: "block",
@@ -130,21 +155,12 @@ export function ManualScreen({
 
         <div style={{ marginTop: 18, borderLeft: `3px solid ${C.me}`, paddingLeft: 14 }}>
           {reason === "photofail" ? (
-            source === "pdf" ? (
-              <>
-                <div style={{ fontFamily: SERIF, fontSize: 30, lineHeight: 1.15 }}>No total in that PDF.</div>
-                <div style={{ marginTop: 8, font: `400 15px ${ARCHIVO}`, lineHeight: 1.5, color: MUTED_1 }}>
-                  Nothing in the file read as a receipt. Type it in below, or pick a different file.
-                </div>
-              </>
-            ) : (
-              <>
-                <div style={{ fontFamily: SERIF, fontSize: 30, lineHeight: 1.15 }}>No text in that photo.</div>
-                <div style={{ marginTop: 8, font: `400 15px ${ARCHIVO}`, lineHeight: 1.5, color: MUTED_1 }}>
-                  The image was too dark to find a total. Type it in below, or shoot it again with the receipt flat and lit.
-                </div>
-              </>
-            )
+            <>
+              <div style={{ fontFamily: SERIF, fontSize: 30, lineHeight: 1.15 }}>{FAIL_COPY[source].title}</div>
+              <div style={{ marginTop: 8, font: `400 15px ${ARCHIVO}`, lineHeight: 1.5, color: MUTED_1 }}>
+                {FAIL_COPY[source].body}
+              </div>
+            </>
           ) : (
             <>
               <div style={{ fontFamily: SERIF, fontSize: 30, lineHeight: 1.15 }}>Enter it by hand.</div>
@@ -168,7 +184,7 @@ export function ManualScreen({
               cursor: "pointer",
             }}
           >
-            {source === "pdf" ? "Choose another file" : "Retake photo"}
+            {FAIL_COPY[source].retry}
           </button>
         )}
 

@@ -96,7 +96,11 @@ function reloadForLogin(): never {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    // A FormData body sets its own multipart Content-Type (with boundary).
+    headers:
+      init?.body instanceof FormData
+        ? init.headers
+        : { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   if (res.status === 204) return undefined as T;
   if (!res.ok) {
@@ -128,6 +132,12 @@ export interface CreateLedgerBody {
   /** Client-generated UUID (contract rule 4). */
   id: string;
   friend_email: string;
+}
+
+/** One file of a receipt upload, and the type it goes up as. */
+export interface ReceiptUploadPage {
+  blob: Blob;
+  type: string;
 }
 
 export const api = {
@@ -170,15 +180,29 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  /** Raw receipt bytes up — a photo or a PDF, the blob's own type decides.
-   *  The client-minted UUID is the receipt PK. Returns the (possibly
-   *  deduped, possibly already-extracted) receipt + items. */
-  uploadReceipt: (ledgerId: string, id: string, blob: Blob, contentType?: string) =>
-    request<ReceiptResponse>(`/api/ledgers/${ledgerId}/receipts?id=${encodeURIComponent(id)}`, {
-      method: "POST",
-      headers: { "Content-Type": contentType || blob.type || "image/jpeg" },
-      body: blob,
-    }),
+  /** Receipt bytes up — photos or PDFs, each page's own type decides. One
+   *  page goes up as the raw body; several go as multipart/form-data, one
+   *  `page` part each, in reading order. The client-minted UUID is the
+   *  receipt PK. Returns the (possibly deduped, possibly already-extracted)
+   *  receipt + items. */
+  uploadReceipt: (ledgerId: string, id: string, pages: ReceiptUploadPage[]) => {
+    const path = `/api/ledgers/${ledgerId}/receipts?id=${encodeURIComponent(id)}`;
+    if (pages.length === 1) {
+      const [{ blob, type }] = pages as [ReceiptUploadPage];
+      return request<ReceiptResponse>(path, {
+        method: "POST",
+        headers: { "Content-Type": type || blob.type || "image/jpeg" },
+        body: blob,
+      });
+    }
+    const form = new FormData();
+    pages.forEach(({ blob, type }, i) => {
+      // Re-wrap so the part carries the right type even when the picker
+      // handed over an untyped File.
+      form.append("page", new Blob([blob], { type: type || blob.type || "image/jpeg" }), `page-${i + 1}`);
+    });
+    return request<ReceiptResponse>(path, { method: "POST", body: form });
+  },
   extractReceipt: (receiptId: string) =>
     request<ReceiptResponse>(`/api/receipts/${receiptId}/extract`, { method: "POST" }),
   discardReceipt: (receiptId: string) =>

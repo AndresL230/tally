@@ -23,7 +23,8 @@ export interface LedgerScreenProps {
   onSettle?: () => void;
   /** The add-receipt sheet's "Take a photo" action (camera capture). */
   onTakePhoto?: () => void;
-  /** The add-receipt sheet's "Choose a photo or PDF" action (file picker). */
+  /** The add-receipt sheet's "Choose photos or a PDF" action (file picker;
+   *  several files at once are the pages of one receipt). */
   onChooseFromLibrary?: () => void;
   /** The add-receipt sheet's "Enter it by hand" action. */
   onEnterByHand?: () => void;
@@ -333,7 +334,7 @@ export function LedgerScreen({
                   cursor: "pointer",
                 }}
               >
-                Choose a photo or PDF
+                Choose photos or a PDF
               </button>
               <button
                 onClick={() => {

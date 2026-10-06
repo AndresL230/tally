@@ -4,7 +4,8 @@
 // contracts, never from src/worker/**.
 //
 // Routes under test (all behind Access middleware + ledger membership):
-//   POST /api/ledgers/:id/receipts?id=<client-uuid>   (raw image bytes)
+//   POST /api/ledgers/:id/receipts?id=<client-uuid>   (raw image bytes, or
+//                                                      multipart pages)
 //   POST /api/receipts/:rid/extract                   (AI Gateway, mocked via global fetch patch)
 //   POST /api/receipts/:rid/discard
 //   POST /api/ledgers/:id/expenses                    (method 'items' now legal;
@@ -19,6 +20,7 @@ import { env, SELF } from "cloudflare:test";
 import { authedFetch } from "../helpers/auth";
 import { ALEX, JORDAN, SAM, OUTSIDER, insertLedger, insertExpense, insertReceipt } from "../helpers/fixtures";
 import { GLOBAL_DAILY_UPLOADS, PER_USER_DAILY_UPLOADS } from "../../src/worker/receipts";
+import { MAX_RECEIPT_PAGES } from "../../src/shared/types";
 import { splitItems } from "../../src/shared/money";
 import type { ApiEntry, ApiItem, ApiReceipt, LedgerDetail } from "../../src/shared/types";
 
@@ -138,6 +140,55 @@ function uploadReceipt(
     headers["Content-Type"] = opts.contentType ?? "image/jpeg";
   }
   return authedFetch(path, email, { method: "POST", headers, body: bytes });
+}
+
+interface UploadPage {
+  bytes: Uint8Array;
+  type?: string; // default image/jpeg
+}
+
+/** A several-file receipt: multipart/form-data, one `page` part per file,
+ *  in reading order (the fetch sets the multipart Content-Type). */
+function uploadPages(
+  ledgerId: string,
+  email: string,
+  pages: UploadPage[],
+  id: string = crypto.randomUUID(),
+): Promise<Response> {
+  const form = new FormData();
+  pages.forEach((p, i) => {
+    form.append("page", new Blob([p.bytes], { type: p.type ?? "image/jpeg" }), `page-${i + 1}`);
+  });
+  return authedFetch(`/api/ledgers/${ledgerId}/receipts?id=${id}`, email, {
+    method: "POST",
+    body: form,
+  });
+}
+
+async function receiptPageRows(rid: string): Promise<Array<{ page: number; r2_key: string }>> {
+  const res = await env.DB.prepare(
+    "SELECT page, r2_key FROM receipt_pages WHERE receipt_id = ?1 ORDER BY page",
+  )
+    .bind(rid)
+    .all<{ page: number; r2_key: string }>();
+  return res.results;
+}
+
+async function sha256HexOf(bytes: Uint8Array | string): Promise<string> {
+  const data = typeof bytes === "string" ? new TextEncoder().encode(bytes) : bytes;
+  return toHex(await crypto.subtle.digest("SHA-256", data));
+}
+
+/** Every content block the captured gateway request carried, in order. */
+function contentBlocksOf(captured: string): Array<Record<string, unknown>> {
+  const body = JSON.parse(captured) as { messages?: Array<{ content?: unknown }> };
+  const blocks: Array<Record<string, unknown>> = [];
+  for (const msg of body.messages ?? []) {
+    if (Array.isArray(msg.content)) {
+      for (const block of msg.content as Array<Record<string, unknown>>) blocks.push(block);
+    }
+  }
+  return blocks;
 }
 
 /** Upload fresh random bytes and return the created receipt (status 'uploaded'). */
@@ -555,6 +606,202 @@ describe("POST /api/ledgers/:id/receipts — upload", () => {
     const rejected = await uploadReceipt(ledgerId, ALEX, overLimit);
     expect(rejected.status).toBe(413);
     expect(await countReceipts()).toBe(1); // only the at-limit upload landed
+  });
+});
+
+describe("several files, one receipt (multipart pages)", () => {
+  it("three pages => 201, page 1 on the receipt row, pages 2..3 in receipt_pages, every object in R2 with its own type", async () => {
+    const clientId = crypto.randomUUID();
+    const top = fakeImage("long-receipt-top");
+    const bottom = fakeImage("long-receipt-bottom", 300);
+    const slip = fakePdf("card-slip");
+    const res = await uploadPages(
+      ledgerId,
+      ALEX,
+      [{ bytes: top }, { bytes: bottom, type: "image/png" }, { bytes: slip, type: "application/pdf" }],
+      clientId,
+    );
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as ReceiptResponse;
+    expect(json.receipt.id).toBe(clientId);
+    expect(json.receipt.status).toBe("uploaded");
+    expect(json.items).toEqual([]);
+
+    const row = await receiptRow(clientId);
+    expect(row!.r2_key).toBe(`receipts/${ledgerId}/${clientId}.jpg`);
+    expect(await receiptPageRows(clientId)).toEqual([
+      { page: 2, r2_key: `receipts/${ledgerId}/${clientId}-2.jpg` },
+      { page: 3, r2_key: `receipts/${ledgerId}/${clientId}-3.pdf` },
+    ]);
+
+    // The dedupe key covers every page, in order.
+    const digests = [await sha256HexOf(top), await sha256HexOf(bottom), await sha256HexOf(slip)];
+    expect(row!.sha256).toBe(await sha256HexOf(`pages:${digests.join(",")}`));
+
+    const expected: Array<[string, Uint8Array, string]> = [
+      [row!.r2_key!, top, "image/jpeg"],
+      [`receipts/${ledgerId}/${clientId}-2.jpg`, bottom, "image/png"],
+      [`receipts/${ledgerId}/${clientId}-3.pdf`, slip, "application/pdf"],
+    ];
+    for (const [key, bytes, type] of expected) {
+      const head = await env.RECEIPTS.head(key);
+      expect(head).not.toBeNull();
+      expect(head!.size).toBe(bytes.length);
+      expect(head!.httpMetadata?.contentType).toBe(type);
+    }
+  });
+
+  it("the same pages again (different client id) => 200, the SAME receipt, one row", async () => {
+    const pages = [{ bytes: fakeImage("dedupe-a") }, { bytes: fakeImage("dedupe-b") }];
+    const firstId = crypto.randomUUID();
+    expect((await uploadPages(ledgerId, ALEX, pages, firstId)).status).toBe(201);
+    const again = await uploadPages(ledgerId, JORDAN, pages);
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as ReceiptResponse).receipt.id).toBe(firstId);
+    expect(await countReceipts(ledgerId)).toBe(1);
+  });
+
+  it("the same pages in a different order are a different receipt", async () => {
+    const a = { bytes: fakeImage("order-a") };
+    const b = { bytes: fakeImage("order-b") };
+    expect((await uploadPages(ledgerId, ALEX, [a, b])).status).toBe(201);
+    expect((await uploadPages(ledgerId, ALEX, [b, a])).status).toBe(201);
+    expect(await countReceipts(ledgerId)).toBe(2);
+  });
+
+  it("a one-page multipart upload is the raw upload: same key, no page rows, dedupes against the raw bytes", async () => {
+    const bytes = fakeImage("one-page-either-way");
+    const rawId = crypto.randomUUID();
+    expect((await uploadReceipt(ledgerId, ALEX, bytes, { id: rawId })).status).toBe(201);
+    const res = await uploadPages(ledgerId, ALEX, [{ bytes }]);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as ReceiptResponse).receipt.id).toBe(rawId);
+    expect(await receiptPageRows(rawId)).toEqual([]);
+    expect(await countReceipts(ledgerId)).toBe(1);
+  });
+
+  it("more than MAX_RECEIPT_PAGES pages => 400, nothing written", async () => {
+    const pages = Array.from({ length: MAX_RECEIPT_PAGES + 1 }, (_, i) => ({
+      bytes: fakeImage(`too-many-${i}`),
+    }));
+    const res = await uploadPages(ledgerId, ALEX, pages);
+    expect(res.status).toBe(400);
+    expect(await countReceipts()).toBe(0);
+  });
+
+  it("exactly MAX_RECEIPT_PAGES pages is accepted", async () => {
+    const pages = Array.from({ length: MAX_RECEIPT_PAGES }, (_, i) => ({
+      bytes: fakeImage(`at-cap-${i}`),
+    }));
+    const res = await uploadPages(ledgerId, ALEX, pages);
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as ReceiptResponse;
+    expect(await receiptPageRows(json.receipt.id)).toHaveLength(MAX_RECEIPT_PAGES - 1);
+  });
+
+  it("one page of a disallowed type, an empty page, a text part or no pages at all => 400, nothing written", async () => {
+    const good = { bytes: fakeImage("good-page") };
+    expect(
+      (await uploadPages(ledgerId, ALEX, [good, { bytes: fakeImage("gif"), type: "image/gif" }])).status,
+    ).toBe(400);
+    expect((await uploadPages(ledgerId, ALEX, [good, { bytes: new Uint8Array(0) }])).status).toBe(400);
+    expect((await uploadPages(ledgerId, ALEX, [])).status).toBe(400);
+
+    const textPart = new FormData();
+    textPart.append("page", new Blob([fakeImage("blob-page")], { type: "image/jpeg" }), "p1");
+    textPart.append("page", "not a file");
+    expect(
+      (
+        await authedFetch(`/api/ledgers/${ledgerId}/receipts?id=${crypto.randomUUID()}`, ALEX, {
+          method: "POST",
+          body: textPart,
+        })
+      ).status,
+    ).toBe(400);
+    expect(await countReceipts()).toBe(0);
+  });
+
+  it("a page over 8 MB, or a set over the total cap, => 413, nothing written", async () => {
+    const big = new Uint8Array(8_000_001);
+    big[0] = 9;
+    expect((await uploadPages(ledgerId, ALEX, [{ bytes: fakeImage("small") }, { bytes: big }])).status).toBe(413);
+
+    // Three pages each under the per-page cap, together over 20 MB.
+    const pages = [1, 2, 3].map((n) => {
+      const bytes = new Uint8Array(7_000_000);
+      bytes[0] = n;
+      return { bytes };
+    });
+    expect((await uploadPages(ledgerId, ALEX, pages)).status).toBe(413);
+    expect(await countReceipts()).toBe(0);
+  });
+
+  it("extract sends every page to the model in ONE call, in order, with the several-pages prompt", async () => {
+    const top = fakeImage("extract-top");
+    const bottom = fakeImage("extract-bottom");
+    const slip = fakePdf("extract-slip");
+    const clientId = crypto.randomUUID();
+    expect(
+      (
+        await uploadPages(
+          ledgerId,
+          ALEX,
+          [{ bytes: top }, { bytes: bottom, type: "image/webp" }, { bytes: slip, type: "application/pdf" }],
+          clientId,
+        )
+      ).status,
+    ).toBe(201);
+
+    let captured = "";
+    const mock = interceptGateway(cleanFixture, {
+      onBody: (body) => {
+        captured = body;
+      },
+    });
+    const res = await extract(clientId, ALEX);
+    expect(res.status).toBe(200);
+    expect(mock.calls()).toBe(1);
+
+    const blocks = contentBlocksOf(captured);
+    const fileBlocks = blocks.filter((b) => b["type"] === "image" || b["type"] === "document");
+    expect(fileBlocks.map((b) => b["type"])).toEqual(["image", "image", "document"]);
+    const sources = fileBlocks.map((b) => b["source"] as Record<string, unknown>);
+    expect(sources.map((s) => s["media_type"])).toEqual(["image/jpeg", "image/webp", "application/pdf"]);
+    expect(sources.map((s) => s["data"])).toEqual([toBase64(top), toBase64(bottom), toBase64(slip)]);
+    const text = blocks.find((b) => b["type"] === "text")!["text"] as string;
+    expect(text).toContain("3 files are ONE receipt");
+
+    const json = (await res.json()) as ReceiptResponse;
+    expect(json.receipt.status).toBe("needs_review");
+    expect(json.receipt.total_cents).toBe(7550);
+    expect(json.items).toHaveLength(6);
+  });
+
+  it("a one-page receipt keeps the single-receipt prompt", async () => {
+    const clientId = crypto.randomUUID();
+    expect((await uploadReceipt(ledgerId, ALEX, fakeImage("single-prompt"), { id: clientId })).status).toBe(201);
+    let captured = "";
+    interceptGateway(cleanFixture, {
+      onBody: (body) => {
+        captured = body;
+      },
+    });
+    expect((await extract(clientId, ALEX)).status).toBe(200);
+    const text = contentBlocksOf(captured).find((b) => b["type"] === "text")!["text"] as string;
+    expect(text).toMatch(/^Read this receipt/);
+  });
+
+  it("a missing page object => receipt 'failed', route 500, no model call", async () => {
+    const clientId = crypto.randomUUID();
+    expect(
+      (await uploadPages(ledgerId, ALEX, [{ bytes: fakeImage("kept") }, { bytes: fakeImage("lost") }], clientId))
+        .status,
+    ).toBe(201);
+    await env.RECEIPTS.delete(`receipts/${ledgerId}/${clientId}-2.jpg`);
+
+    const res = await extract(clientId, ALEX);
+    expect(res.status).toBe(500);
+    expect((await receiptRow(clientId))!.status).toBe("failed");
   });
 });
 

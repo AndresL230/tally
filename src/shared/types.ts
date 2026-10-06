@@ -45,6 +45,11 @@ export type ReceiptStatus =
   | "failed"
   | "discarded";
 
+/** How many files one receipt upload may carry (photos of a long receipt
+ *  in parts, front and back, …). The server refuses more; the client says
+ *  so before uploading. */
+export const MAX_RECEIPT_PAGES = 10;
+
 export interface ApiReceipt {
   id: string;
   ledger_id: string;

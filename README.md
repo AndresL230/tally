@@ -1,10 +1,10 @@
 # Tally
 
 A receipt-scanning debt ledger for exactly two people, on Cloudflare Workers.
-One person photographs a receipt — or uploads the PDF one that arrived by
-email; the app extracts merchant, date, total, and line items; the uploader
-assigns items; the balance updates. Extraction drafts, never posts — a human
-confirms every entry.
+One person photographs a receipt — in one shot, or several for a long one —
+or uploads the PDF one that arrived by email; the app extracts merchant,
+date, total, and line items; the uploader assigns items; the balance
+updates. Extraction drafts, never posts — a human confirms every entry.
 
 ## Stack
 
@@ -13,10 +13,11 @@ confirms every entry.
 - **React + Vite + TypeScript** client (`src/client/`), ported from the
   design mockup in `mockup/` (kept for reference).
 - **D1** for data (`migrations/`), **R2** for receipt files (JPEG, PNG,
-  WebP or PDF, 8 MB each).
+  WebP or PDF, 8 MB each; up to 10 files make one receipt).
 - **Anthropic API through Cloudflare AI Gateway** for extraction — a photo
-  goes up as an image block, a PDF as a document block, one call either
-  way. The API key is a Worker secret; the client never calls the model.
+  goes up as an image block, a PDF as a document block, and a receipt of
+  several files sends one block per file — one call either way. The API
+  key is a Worker secret; the client never calls the model.
 - **Own sign-in** — a 6-digit code emailed through Resend, sessions in D1
   (`src/worker/auth.ts`, `session.ts`). See "Sign-in" below.
 - **Vitest with `@cloudflare/vitest-pool-workers`** — tests run in real

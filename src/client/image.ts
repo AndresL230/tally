@@ -27,6 +27,16 @@ export function isReceiptFile(file: File): boolean {
   return file.type.startsWith("image/") || receiptTypeOf(file) === PDF_TYPE;
 }
 
+/** What a scan was fed, for the failure screen's copy and its way back
+ *  in: one photo, one PDF, several photos, or a mix of several files. */
+export type ScanSource = "photo" | "pdf" | "photos" | "files";
+
+export function scanSourceOf(files: File[]): ScanSource {
+  const pdfs = files.filter((f) => receiptTypeOf(f) === PDF_TYPE).length;
+  if (files.length === 1) return pdfs === 1 ? "pdf" : "photo";
+  return pdfs === 0 ? "photos" : "files";
+}
+
 export async function downscaleImage(file: File | Blob): Promise<Blob> {
   // A PDF has nothing to downscale; it goes up byte for byte.
   if (file.type === PDF_TYPE) return file;

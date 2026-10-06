@@ -296,6 +296,23 @@ export const STATES: GalleryState[] = [
     ),
   },
   {
+    id: "manual-photosfail",
+    label: "Several photos didn't read",
+    render: (C) => (
+      <ManualScreen
+        reason="photofail"
+        source="photos"
+        colors={C}
+        friendName={F}
+        viewerEmail={VIEWER}
+        friendEmail={FRIEND}
+        onCancel={log("cancel manual")}
+        onCommit={log("commit manual")}
+        onRetake={log("choose photos again")}
+      />
+    ),
+  },
+  {
     id: "settle",
     label: "Settle up",
     render: (C) => (

@@ -1054,6 +1054,31 @@ describe("POST /api/receipts/:rid/extract — gating, failures, cache", () => {
     expect(mock.calls()).toBe(1); // still exactly one model call for these bytes
   });
 
+  it("re-uploading the bytes of a FAILED receipt lands on it, and extract reads it again", async () => {
+    const bytes = fakeImage("dedupe-onto-failed");
+    const firstId = crypto.randomUUID();
+    expect((await uploadReceipt(ledgerId, ALEX, bytes, { id: firstId })).status).toBe(201);
+    interceptGateway("upstream exploded", { status: 500 });
+    expect((await extract(firstId, ALEX)).status).toBe(500);
+    expect((await receiptRow(firstId))!.status).toBe("failed");
+
+    // The client re-picks the same files: the dedupe answers 'failed', and
+    // the client runs extract again rather than giving up on the spot.
+    const res = await uploadReceipt(ledgerId, ALEX, bytes, { id: crypto.randomUUID() });
+    expect(res.status).toBe(200);
+    const deduped = (await res.json()) as ReceiptResponse;
+    expect(deduped.receipt.id).toBe(firstId);
+    expect(deduped.receipt.status).toBe("failed");
+
+    const mock = interceptGateway(cleanFixture);
+    const retry = await extract(firstId, ALEX);
+    expect(retry.status).toBe(200);
+    expect(mock.calls()).toBe(1);
+    const json = (await retry.json()) as ReceiptResponse;
+    expect(json.receipt.status).toBe("needs_review");
+    expect(json.items).toHaveLength(6);
+  });
+
   it("request shape (rule 7): tool named record_receipt, forced tool_choice, base64 image block, gateway auth headers", async () => {
     const bytes = fakeImage("request-shape");
     const clientId = crypto.randomUUID();
@@ -1082,6 +1107,10 @@ describe("POST /api/receipts/:rid/extract — gating, failures, cache", () => {
     const tool = (body.tools ?? []).find((t) => t.name === "record_receipt");
     expect(tool).toBeDefined();
     expect(tool!.input_schema).toBeDefined();
+    // …that keeps discounts out of the items: one read as a negative-priced
+    // item would drop the whole list (see negative-price.json).
+    const schema = tool!.input_schema as { properties?: { items?: { description?: string } } };
+    expect(schema.properties?.items?.description).toMatch(/discounts/);
 
     // …with tool_choice FORCING it…
     expect(body.tool_choice).toMatchObject({ type: "tool", name: "record_receipt" });

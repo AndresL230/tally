@@ -490,12 +490,15 @@ export default function App() {
 
       let { receipt, items } = up;
       setFlow({ receipt, items });
-      if (receipt.status !== "needs_review" && receipt.status !== "failed") {
+      if (receipt.status !== "needs_review") {
         // Fresh upload (or a dedupe onto a not-yet-extracted receipt): run
         // the extraction round-trip. A cache hit server-side returns the
         // stored result without a model call. If the OTHER member is mid-
         // extraction on the same bytes (status 'extracting', server-side
-        // claim), poll until their result lands.
+        // claim), poll until their result lands. A dedupe onto a 'failed'
+        // receipt runs it again too — the server re-claims a failed read —
+        // or re-picking the same files after one bad gateway call could
+        // never get past the failure screen.
         const extracted = await api.extractReceipt(receipt.id);
         if (!live()) return;
         receipt = extracted.receipt;

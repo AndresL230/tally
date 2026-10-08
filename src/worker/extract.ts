@@ -35,12 +35,12 @@ const RECEIPT_TOOL = {
       total_cents: {
         type: ["integer", "null"],
         description:
-          "The printed grand total in integer cents, including tax and any tip. null if unreadable.",
+          "The printed grand total in integer cents — what was actually charged, after any discounts and including tax, fees and any tip. null if unreadable.",
       },
       items: {
         type: "array",
         description:
-          "Line items. Omit tax, tip, subtotal and total lines — items only.",
+          "Line items: only the things that were bought. Omit tax, tip, fees (service, delivery, bag), discounts, coupons and savings, and subtotal and total lines — the grand total already accounts for all of them.",
         items: {
           type: "object",
           properties: {
@@ -191,15 +191,20 @@ export interface ReceiptPage {
   mediaType: string;
 }
 
-const SINGLE_PAGE_PROMPT =
-  "Read this receipt and record its fields. Integer cents. Only real line items — never tax, tip, subtotal or total rows as items.";
+// A discount read as an item would carry a negative price, and one bad item
+// drops the whole list (salvageExtraction) — so discounts and fees stay out
+// of the items and reach the split through the total instead.
+const ITEMS_RULE =
+  "Integer cents. Only real line items — never tax, tip, fees, discounts, coupons, subtotal or total rows as items.";
+
+const SINGLE_PAGE_PROMPT = `Read this receipt and record its fields. ${ITEMS_RULE}`;
 
 function multiPagePrompt(count: number): string {
   return (
     `These ${count} files are ONE receipt, in order — a long receipt photographed in parts, ` +
     "or its front and back. Read them together and record that one receipt's fields. " +
     "Where the photos overlap, a line that shows up on two of them is still one item. " +
-    "Integer cents. Only real line items — never tax, tip, subtotal or total rows as items."
+    ITEMS_RULE
   );
 }
 

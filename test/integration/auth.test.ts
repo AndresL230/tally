@@ -300,7 +300,7 @@ describe("POST /api/auth/code + /api/auth/verify", () => {
   });
 
   it("a mail failure rolls the code back and reports 502", async () => {
-    failNextSend(500);
+    failNextSend();
     const res = await post("/api/auth/code", { email: ALEX });
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: "couldn't send the email" });

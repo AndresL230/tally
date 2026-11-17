@@ -7,35 +7,35 @@ export interface Mail {
   text: string;
 }
 
-const RESEND_URL = "https://api.resend.com/emails";
 const DEFAULT_FROM = "Tally <sign-in@tally.andresl.dev>";
 
+/** "Tally <sign-in@x.dev>" → { name, email }; otherwise the bare address. */
+export function parseFrom(value: string): string | EmailAddress {
+  const m = /^\s*(.*?)\s*<([^<>\s]+@[^<>\s]+)>\s*$/.exec(value);
+  if (!m) return value.trim();
+  const name = m[1]!.replace(/^"(.*)"$/, "$1");
+  return name ? { name, email: m[2]! } : m[2]!;
+}
+
 /**
- * The one door mail leaves through. With RESEND_API_KEY set it POSTs to
- * Resend and throws on a non-2xx. Without it (local dev only) it prints the
- * message to the terminal and returns — the text body carries the code, and
- * this is the ONLY condition under which a code is ever logged.
+ * The one door mail leaves through: Cloudflare Email Sending via the EMAIL
+ * binding. The binding throws an Error carrying a string `code` (for example
+ * E_SENDER_NOT_VERIFIED); that is rethrown with the code in the message so
+ * callers' logs say why. Under `wrangler dev` the binding is simulated: it
+ * prints From/To/Subject and writes the text body (with the code) to a file.
  */
 export async function sendMail(env: Env, mail: Mail): Promise<void> {
-  if (!env.RESEND_API_KEY) {
-    console.log(`[mail] ${mail.subject} → ${mail.to}\n${mail.text}`);
-    return;
-  }
-  const res = await fetch(RESEND_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${env.RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from: env.MAIL_FROM ?? DEFAULT_FROM,
-      to: [mail.to],
+  try {
+    await env.EMAIL.send({
+      from: parseFrom(env.MAIL_FROM ?? DEFAULT_FROM),
+      to: mail.to,
       subject: mail.subject,
       html: mail.html,
       text: mail.text,
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`resend ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    });
+  } catch (err) {
+    const code = (err as { code?: unknown }).code;
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`email ${typeof code === "string" ? code : "send"} failed: ${message.slice(0, 200)}`);
   }
 }

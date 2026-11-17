@@ -1,11 +1,12 @@
-// Resend, intercepted. SELF's worker runs in this isolate, so patching
-// globalThis.fetch captures its outbound mail. Same shape as the gateway
-// patch in receipts.test.ts: anything un-mocked throws.
+// Cloudflare Email Sending, intercepted. SELF's worker runs in this isolate
+// and shares `env`, so swapping env.EMAIL for a fake binding captures every
+// send. Without the patch, sends go to miniflare's local simulator (which
+// logs and writes temp files, never the network).
 
 import { env } from "cloudflare:test";
 
 export interface SentMail {
-  from: string;
+  from: string | EmailAddress;
   to: string[];
   subject: string;
   html: string;
@@ -14,43 +15,48 @@ export interface SentMail {
 
 export const outbox: SentMail[] = [];
 
-const RESEND_URL = "https://api.resend.com/emails";
 const mutableEnv = env as unknown as Record<string, unknown>;
-let realFetch: typeof fetch | null = null;
-let failStatus: number | null = null;
+let realBinding: unknown = undefined;
+let failCode: string | null = null;
 
-/** Set RESEND_API_KEY (so the real send path runs) and capture every send. */
+function asList(v: EmailMessageBuilder["to"]): string[] {
+  const list = v === undefined ? [] : Array.isArray(v) ? v : [v];
+  return list.map((a) => (typeof a === "string" ? a : a.email));
+}
+
+/** Replace the EMAIL binding with a fake that records each message. */
 export function installMailPatch(): void {
-  mutableEnv["RESEND_API_KEY"] = "re_test";
-  realFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const req = new Request(input as RequestInfo, init);
-    if (req.url !== RESEND_URL) throw new Error(`unmocked outbound fetch: ${req.url}`);
-    if (failStatus !== null) {
-      const status = failStatus;
-      failStatus = null;
-      return new Response(JSON.stringify({ message: "nope" }), { status });
-    }
-    const body = (await req.json()) as SentMail;
-    outbox.push(body);
-    return new Response(JSON.stringify({ id: `msg_${outbox.length}` }), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
-  }) as typeof fetch;
+  realBinding = mutableEnv["EMAIL"];
+  const fake = {
+    async send(message: EmailMessageBuilder): Promise<EmailSendResult> {
+      if (failCode !== null) {
+        const err = Object.assign(new Error("simulated send failure"), { code: failCode });
+        failCode = null;
+        throw err;
+      }
+      outbox.push({
+        from: message.from,
+        to: asList(message.to),
+        subject: message.subject,
+        html: message.html ?? "",
+        text: message.text ?? "",
+      });
+      return { messageId: `msg_${outbox.length}` } as EmailSendResult;
+    },
+  };
+  mutableEnv["EMAIL"] = fake;
 }
 
 export function removeMailPatch(): void {
-  if (realFetch) globalThis.fetch = realFetch;
-  realFetch = null;
-  failStatus = null;
-  delete mutableEnv["RESEND_API_KEY"];
+  if (realBinding !== undefined) mutableEnv["EMAIL"] = realBinding;
+  realBinding = undefined;
+  failCode = null;
   outbox.length = 0;
 }
 
-/** The next send returns this HTTP status instead of succeeding. */
-export function failNextSend(status: number): void {
-  failStatus = status;
+/** The next send throws a binding error with this code instead of succeeding. */
+export function failNextSend(code = "E_INTERNAL_SERVER_ERROR"): void {
+  failCode = code;
 }
 
 /** The six digits from the latest code email sent to `email`. */

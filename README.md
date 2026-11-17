@@ -18,11 +18,12 @@ updates. Extraction drafts, never posts — a human confirms every entry.
   goes up as an image block, a PDF as a document block, and a receipt of
   several files sends one block per file — one call either way. The API
   key is a Worker secret; the client never calls the model.
-- **Own sign-in** — a 6-digit code emailed through Resend, sessions in D1
+- **Own sign-in** — a 6-digit code emailed through Cloudflare Email
+  Sending (the `EMAIL` binding), sessions in D1
   (`src/worker/auth.ts`, `session.ts`). See "Sign-in" below.
 - **Vitest with `@cloudflare/vitest-pool-workers`** — tests run in real
   workerd with real D1/R2 bindings; the only fakes are outbound mail
-  (Resend) and the model API (fixture responses).
+  (a recording `EMAIL` binding) and the model API (fixture responses).
 
 ## Money rules (non-negotiable)
 
@@ -50,10 +51,10 @@ npm run dev           # wrangler dev on http://127.0.0.1:8787
 For a client dev loop with HMR, additionally run `npm run dev:client` (Vite
 on :5173, proxying `/api` to wrangler).
 
-No `.dev.vars` is required. Without `RESEND_API_KEY` the Worker prints
-sign-in codes and invite mail to the wrangler terminal; sign in as
-`alex@example.com` (a seeded ledger member) and copy the six digits from
-there. `cp .dev.vars.example .dev.vars` makes alex the owner locally so the
+No `.dev.vars` is required. `wrangler dev` simulates the `EMAIL` binding:
+nothing is sent, and the terminal shows each mail's From/To/Subject plus
+the path of a `.txt` file holding the body. Sign in as `alex@example.com`
+(a seeded ledger member) and copy the six digits from that file. `cp .dev.vars.example .dev.vars` makes alex the owner locally so the
 owner settings screen shows.
 
 ### Tests
@@ -63,8 +64,8 @@ npm test              # typecheck (worker, client, tests) + vitest
 ```
 
 Migrations are applied from zero on every run. Auth tests mint real session
-rows and, for the code flow, patch outbound `fetch` to capture what Resend
-would have sent (`test/helpers/mail.ts`).
+rows and, for the code flow, swap `env.EMAIL` for a fake that records what
+would have been sent (`test/helpers/mail.ts`).
 
 ## Sign-in
 
@@ -84,10 +85,11 @@ There are no passwords and no third-party identity provider.
   ledger with someone's email is itself an invite (they get an email).
   Switching back to invite-only signs out anyone who is neither a ledger
   member nor invited, so opening sign-up is reversible.
-- **Mail** (`src/worker/mailer.ts`): Resend, from `MAIL_FROM`. Set the
-  `RESEND_API_KEY` secret and verify the sending domain in Resend
-  (its DKIM/SPF records go in the Cloudflare zone). Without the key the
-  Worker prints mail to the console — local dev only.
+- **Mail** (`src/worker/mailer.ts`): Cloudflare Email Sending through the
+  `send_email` binding `EMAIL`, from `MAIL_FROM`. No API key: the domain
+  is onboarded once (`npx wrangler email sending enable tally.andresl.dev`,
+  which adds its SPF/DKIM records to the zone). The binding only allows
+  `sign-in@tally.andresl.dev` as sender, so `MAIL_FROM` must use it.
 - **Scan caps** (`src/worker/receipts.ts`): 30 uploads per person and
   200 overall per 24 h, so opening sign-up can't drain the model key.
 

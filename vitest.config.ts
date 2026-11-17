@@ -25,11 +25,12 @@ export default defineConfig(async () => {
             // the default, as on a fresh deployment.
             AI_GATEWAY_ACCOUNT_ID: "test-account",
             AI_GATEWAY_ID: "test-gw",
-            // Own auth. RESEND_API_KEY is deliberately NOT bound: the mailer
-            // then logs instead of fetching, so no suite touches the network.
-            // Auth tests set it via env mutation and patch fetch (helpers/mail).
+            // Own auth. EMAIL (from wrangler.jsonc) is miniflare's local
+            // simulator, so no suite sends real mail; auth tests swap in a
+            // recording fake (helpers/mail). MAIL_FROM must be the binding's
+            // one allowed sender or the simulator rejects the send.
             ADMIN_EMAIL: "admin@example.com",
-            MAIL_FROM: "Tally <sign-in@tally.test>",
+            MAIL_FROM: "Tally <sign-in@tally.andresl.dev>",
           },
         },
       }),

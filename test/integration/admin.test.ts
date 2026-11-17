@@ -110,7 +110,7 @@ describe("admin routes", () => {
   });
 
   it("reports a mail failure as 502 and keeps the invite pending", async () => {
-    failNextSend(500);
+    failNextSend();
     const res = await json("POST", "/api/admin/invites", ADMIN, { email: JORDAN });
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ error: "couldn't send the email" });

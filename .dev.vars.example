@@ -1,9 +1,8 @@
 # Copy to .dev.vars for local development (never committed, never deployed).
 #
-# Nothing here is required. Without RESEND_API_KEY the Worker prints sign-in
-# codes and invite mail to the wrangler terminal instead of sending them.
+# Nothing here is required. Mail needs no key: `wrangler dev` simulates the
+# EMAIL binding and prints where it saved each message (codes included).
 #
 # ADMIN_EMAIL overrides the wrangler.jsonc owner locally so the seeded viewer
 # (alex@example.com) sees the owner settings screen.
 ADMIN_EMAIL=alex@example.com
-# RESEND_API_KEY=re_...

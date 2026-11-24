@@ -36,8 +36,9 @@ and "not yours", so the API doesn't confirm which ledger ids exist.
 The spec's Cloudflare Access One-Time PIN and the local `DEV_ALLOW_USER`
 bypass are gone. The app emails its own six-digit code and keeps sessions in
 D1 (`docs/superpowers/specs/2026-09-11-email-code-auth-design.md`). Local
-development signs in for real: without `RESEND_API_KEY` the code prints to
-the wrangler terminal. There is no longer any identity bypass anywhere.
+development signs in for real: `wrangler dev` simulates the `EMAIL`
+(Cloudflare Email Sending) binding and prints where it saved each message,
+code included. There is no longer any identity bypass anywhere.
 
 ## D6. Schema is stricter than the spec's verbatim DDL
 
